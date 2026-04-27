@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# PyInstaller / Swift build output
+build/
+dist/
+*.spec.bak
+
+# macOS
+.DS_Store
+
+# Cloudflare wrangler local state
+cloudflare_worker/.wrangler/
+
+# Local config (contains user API keys) — copy from config.example.json
+config.json
+config.json.bak-*
+
+# Editor / agent state
+.claude/
+.idea/
+.vscode/

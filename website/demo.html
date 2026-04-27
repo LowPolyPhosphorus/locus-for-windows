@@ -1,0 +1,2126 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Locus — Interactive Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@300;400;500&family=Bricolage+Grotesque:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ─────────────────────────────────────────────
+   TOKENS
+───────────────────────────────────────────── */
+:root {
+  --gold: #E8A020;
+  --gold-pale: #FDF3E0;
+  --ink: #1A1510;
+  --ink-muted: #6B5E4A;
+  --ink-faint: #C4B49A;
+  --cream: #FDFAF5;
+  --surface: #F7F2E8;
+  --border: #E8DFC8;
+  --card: #F7F2E8;
+
+  --serif: 'Instrument Serif', Georgia, serif;
+  --sans: 'Bricolage Grotesque', -apple-system, system-ui, sans-serif;
+  --mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --win-bg: var(--cream);
+  --sidebar-bg: var(--surface);
+  --content-bg: var(--cream);
+  --card-bg: var(--card);
+  --text: var(--ink);
+  --text-muted: var(--ink-muted);
+  --text-faint: var(--ink-faint);
+  --bdr: var(--border);
+
+  --shadow-win: 0 28px 80px rgba(26,21,16,0.28), 0 2px 8px rgba(26,21,16,0.10);
+}
+
+[data-theme="dark"] {
+  --win-bg: #151209;
+  --sidebar-bg: #1A1610;
+  --content-bg: #151209;
+  --card-bg: #201C12;
+  --text: #EDE8DF;
+  --text-muted: #9A8E7A;
+  --text-faint: #5A5044;
+  --bdr: rgba(255,255,255,0.09);
+  --gold-pale: rgba(232,160,32,0.12);
+  --shadow-win: 0 28px 80px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+/* hide demo bar when embedded as iframe */
+@media (max-height: 700px), (display-mode: standalone) { .demo-bar { display: none; } }
+.demo-bar { display: none; }
+
+/* ─────────────────────────────────────────────
+   PAGE CHROME
+───────────────────────────────────────────── */
+body {
+  font-family: var(--sans);
+  font-weight: 300;
+  background: var(--win-bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* demo bar */
+.demo-bar {
+  background: #FDF3E0;
+  border-bottom: 1px solid rgba(232,160,32,0.3);
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  color: var(--ink);
+}
+.demo-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #6B5E4A;
+}
+.demo-pill {
+  background: var(--gold);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.demo-bar a {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #6B5E4A;
+  text-decoration: none;
+  letter-spacing: 0.04em;
+}
+.demo-bar a:hover { color: var(--ink); }
+
+/* page stage */
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0;
+}
+
+/* ─────────────────────────────────────────────
+   MAC WINDOW
+───────────────────────────────────────────── */
+.window {
+  width: 100%;
+  max-width: 100%;
+  min-height: 560px;
+  background: var(--win-bg);
+  border-radius: 0;
+  overflow: hidden;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  flex: 1;
+}
+
+.titlebar {
+  height: 38px;
+  background: var(--sidebar-bg);
+  border-bottom: 1px solid var(--bdr);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.traffic-lights {
+  display: flex;
+  gap: 7px;
+  margin-right: 12px;
+}
+.tl { width: 12px; height: 12px; border-radius: 50%; cursor: default; }
+.tl-close  { background: #FF5F57; }
+.tl-min    { background: #FFBD2E; }
+.tl-max    { background: #28C840; }
+.titlebar-label {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  flex: 1;
+  text-align: center;
+}
+
+/* layout: sidebar + content */
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─────────────────────────────────────────────
+   SIDEBAR
+───────────────────────────────────────────── */
+.sidebar {
+  width: 210px;
+  min-width: 210px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--bdr);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 20px 18px 16px;
+}
+.sidebar-brand-icon { color: var(--gold); width: 18px; height: 18px; flex-shrink: 0; }
+.sidebar-brand-text {
+  font-family: var(--serif);
+  font-size: 22px;
+  color: var(--text);
+  line-height: 1;
+}
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px;
+  gap: 2px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text);
+  text-align: left;
+  transition: background 0.12s;
+}
+.nav-item:hover { background: rgba(232,160,32,0.07); }
+.nav-item.active { background: var(--gold-pale); font-weight: 600; }
+.nav-icon { width: 18px; height: 18px; flex-shrink: 0; color: var(--text-muted); }
+.nav-item.active .nav-icon { color: var(--gold); }
+
+/* ─────────────────────────────────────────────
+   CONTENT AREA
+───────────────────────────────────────────── */
+.content {
+  flex: 1;
+  background: var(--content-bg);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* panels */
+.panel { display: none; flex-direction: column; height: 100%; }
+.panel.active { display: flex; }
+
+/* ─────────────────────────────────────────────
+   SHARED COMPONENTS
+───────────────────────────────────────────── */
+.page-header { padding: 28px 32px 4px; }
+.page-header h2 {
+  font-family: var(--serif);
+  font-size: 34px;
+  font-weight: 400;
+  color: var(--text);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.page-header p { font-size: 13px; color: var(--text-muted); margin-top: 5px; }
+
+.scroll-area { flex: 1; overflow-y: auto; padding: 20px 32px 32px; }
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.field-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 10px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.toggle-row + .toggle-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--bdr); }
+.toggle-row-label { flex: 1; }
+.toggle-row-label strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.toggle-row-label small { font-size: 11px; color: var(--text-muted); }
+
+/* toggle switch */
+.toggle {
+  position: relative;
+  width: 36px; height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin-top: 1px;
+}
+.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-track {
+  position: absolute; inset: 0;
+  background: var(--bdr);
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+.toggle input:checked ~ .toggle-track { background: var(--gold); }
+.toggle-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.toggle input:checked ~ .toggle-thumb { transform: translateX(16px); }
+
+/* btn-primary */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--gold);
+  color: rgba(26,21,16,0.9);
+  border: none;
+  border-radius: 8px;
+  padding: 9px 20px;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s, transform 0.12s;
+}
+.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-primary:active { transform: none; opacity: 0.8; }
+.btn-primary.wide { padding: 13px 40px; border-radius: 12px; }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+/* btn-secondary */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid var(--bdr);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.btn-secondary:hover { background: var(--card-bg); }
+.btn-secondary.danger { color: #E85320; border-color: rgba(232,83,32,0.3); }
+.btn-secondary.danger:hover { background: rgba(232,83,32,0.07); }
+
+/* input */
+.input {
+  width: 100%;
+  background: var(--content-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input:focus { border-color: var(--gold); }
+.input::placeholder { color: var(--text-faint); }
+
+/* class tag */
+.class-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid;
+}
+.tag-preap   { color: #9B5DE5; border-color: rgba(155,93,229,0.3);  background: rgba(155,93,229,0.08); }
+.tag-bio     { color: #3DAA6A; border-color: rgba(61,170,106,0.3);  background: rgba(61,170,106,0.08); }
+.tag-csp     { color: #E8A020; border-color: rgba(232,160,32,0.3);  background: rgba(232,160,32,0.08); }
+.tag-math    { color: #2979FF; border-color: rgba(41,121,255,0.3);  background: rgba(41,121,255,0.08); }
+.tag-spanish { color: #E85320; border-color: rgba(232,83,32,0.3);   background: rgba(232,83,32,0.08);  }
+.tag-history { color: #8B6914; border-color: rgba(139,105,20,0.3);  background: rgba(139,105,20,0.08); }
+.tag-econ    { color: #0097A7; border-color: rgba(0,151,167,0.3);   background: rgba(0,151,167,0.08);  }
+
+/* or-divider */
+.or-divider { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.or-divider span {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.or-line { flex: 1; height: 1px; background: var(--bdr); }
+
+/* ─────────────────────────────────────────────
+   START / LAUNCHER PANEL
+───────────────────────────────────────────── */
+#panel-start { align-items: center; overflow-y: auto; }
+.launcher-inner {
+  width: 100%;
+  max-width: 460px;
+  padding: 28px 32px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.lock-circle {
+  width: 100px; height: 100px;
+  border-radius: 50%;
+  background: var(--gold-pale);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.3s;
+  flex-shrink: 0;
+}
+.lock-circle.session-active { background: rgba(232,83,32,0.1); }
+.lock-circle svg { width: 44px; height: 44px; color: var(--gold); transition: color 0.3s; }
+.lock-circle.session-active svg { color: #E85320; }
+
+.wordmark {
+  font-family: var(--serif);
+  font-size: 48px;
+  font-weight: 400;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -0.015em;
+  margin-top: 14px;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 15px;
+  color: var(--text-muted);
+  min-height: 22px;
+}
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #E85320;
+  flex-shrink: 0;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+.task-area {
+  width: 100%;
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-area-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+/* session active */
+.session-card {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  margin-top: 28px;
+}
+.session-task-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.session-task-meta  { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+.session-timer {
+  font-family: var(--mono);
+  font-size: 36px;
+  font-weight: 400;
+  color: var(--gold);
+  letter-spacing: 0.04em;
+  margin-bottom: 20px;
+  line-height: 1;
+}
+
+/* block tester */
+.block-tester {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-top: 16px;
+}
+.block-tester-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.site-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.site-btn {
+  background: var(--content-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.site-btn:hover { border-color: #E85320; color: #E85320; }
+
+/* notion event list */
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.event-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--bdr);
+  background: var(--card-bg);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.event-row:hover { border-color: rgba(232,160,32,0.35); }
+.event-row.selected { background: var(--gold-pale); border-color: rgba(232,160,32,0.45); }
+.event-row-icon { color: var(--text-faint); width: 16px; height: 16px; flex-shrink: 0; }
+.event-row.selected .event-row-icon { color: var(--gold); }
+.event-row-body { flex: 1; min-width: 0; }
+.event-row-title { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event-row-class { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.event-check { color: var(--gold); width: 16px; height: 16px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
+.event-row.selected .event-check { opacity: 1; }
+.date-header {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 0 3px;
+}
+
+/* ─────────────────────────────────────────────
+   BLOCK OVERLAY
+───────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10,8,6,0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+  padding: 20px;
+}
+.overlay.visible { display: flex; }
+.block-modal {
+  background: var(--win-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 420px;
+  padding: 28px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+}
+.block-modal-icon {
+  width: 48px; height: 48px;
+  background: rgba(232,83,32,0.12);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.block-modal-icon svg { color: #E85320; width: 24px; height: 24px; }
+.block-modal h3 {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.block-modal .domain { font-family: var(--mono); font-size: 12px; color: var(--text-muted); margin-bottom: 20px; }
+.block-modal label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.block-reason-input {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  resize: vertical;
+  min-height: 72px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.block-reason-input:focus { border-color: var(--gold); }
+.block-reason-input::placeholder { color: var(--text-faint); }
+.block-modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+.block-modal-actions .btn-primary { flex: 1; }
+.block-modal-actions .btn-secondary { padding: 9px 16px; }
+
+/* verdict bubble */
+.verdict {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  display: none;
+}
+.verdict.granted { background: rgba(61,170,106,0.12); border: 1px solid rgba(61,170,106,0.3); color: #2A7A4C; }
+.verdict.denied  { background: rgba(232,83,32,0.08);  border: 1px solid rgba(232,83,32,0.25); color: #C04010; }
+[data-theme="dark"] .verdict.granted { color: #5AD490; }
+[data-theme="dark"] .verdict.denied  { color: #FF7050; }
+.verdict.visible { display: block; }
+.verdict-title { font-weight: 600; margin-bottom: 3px; }
+
+/* typing dots */
+.typing-dots { display: none; gap: 4px; align-items: center; margin-top: 16px; }
+.typing-dots.visible { display: flex; }
+.typing-dots span {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: bounce 1.2s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,80%,100% { transform:translateY(0); } 40% { transform:translateY(-6px); } }
+
+/* ─────────────────────────────────────────────
+   CONNECTORS PANEL
+───────────────────────────────────────────── */
+#panel-connectors { flex-direction: row; }
+.connector-sidebar {
+  width: 200px;
+  min-width: 200px;
+  border-right: 1px solid var(--bdr);
+  background: var(--sidebar-bg);
+  flex-shrink: 0;
+}
+.connector-sidebar-title {
+  font-family: var(--serif);
+  font-size: 24px;
+  color: var(--text);
+  padding: 20px 18px 14px;
+  display: block;
+}
+.connector-list { padding: 0 10px; display: flex; flex-direction: column; gap: 3px; }
+.connector-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  transition: background 0.12s;
+}
+.connector-item:hover { background: rgba(232,160,32,0.07); }
+.connector-item.active { background: var(--gold-pale); }
+.connector-icon { color: var(--text-muted); width: 16px; height: 16px; flex-shrink: 0; }
+.connector-item.active .connector-icon { color: var(--gold); }
+.connector-info { flex: 1; min-width: 0; }
+.connector-name { font-size: 13px; font-weight: 400; color: var(--text); line-height: 1.2; }
+.connector-item.active .connector-name { font-weight: 600; }
+.connector-status { font-size: 11px; color: var(--text-muted); }
+.connector-status.connected { color: var(--gold); }
+.connector-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(107,94,74,0.35); flex-shrink: 0; }
+.connector-dot.on { background: #3DAA6A; }
+.connector-detail { flex: 1; overflow-y: auto; }
+
+/* pulled assignments */
+.notion-assignments { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.notion-assignment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--content-bg);
+  border: 1px solid var(--bdr);
+  font-size: 12px;
+}
+.na-title { flex: 1; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.na-date  { font-family: var(--mono); font-size: 10px; color: var(--text-faint); flex-shrink: 0; }
+
+/* ─────────────────────────────────────────────
+   ANALYTICS PANEL
+───────────────────────────────────────────── */
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.kpi-card { background: var(--card-bg); border: 1px solid var(--bdr); border-radius: 12px; padding: 16px; }
+.kpi-label { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+.kpi-value { font-family: var(--serif); font-size: 30px; color: var(--gold); line-height: 1; }
+.kpi-sub   { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+
+/* bar chart */
+.bar-chart { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 4px; }
+.bar-col { display: flex; flex-direction: column; align-items: center; flex: 1; height: 100%; justify-content: flex-end; gap: 3px; }
+.bar {
+  width: 100%;
+  background: var(--gold);
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  transform-origin: bottom;
+  transform: scaleY(0);
+  animation: growUp 0.5s ease-out forwards;
+}
+@keyframes growUp { to { transform: scaleY(1); } }
+.bar.muted { background: rgba(232,160,32,0.35); }
+.bar-lbl { font-family: var(--mono); font-size: 8px; color: var(--text-faint); text-align: center; white-space: nowrap; }
+
+/* hour chart */
+.hour-chart { display: flex; align-items: flex-end; gap: 2px; height: 80px; }
+.hour-col   { display: flex; flex-direction: column; align-items: center; flex: 1; height: 100%; justify-content: flex-end; gap: 2px; }
+.hour-bar   { width: 100%; background: rgba(232,160,32,0.6); border-radius: 2px 2px 0 0; min-height: 1px; transform-origin: bottom; transform: scaleY(0); animation: growUp 0.4s ease-out forwards; }
+.hour-lbl   { font-family: var(--mono); font-size: 7px; color: var(--text-faint); }
+
+/* horizontal bar rows */
+.hbar-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid var(--bdr); }
+.hbar-row:first-child { border-top: none; }
+.hbar-name { font-size: 12px; font-weight: 500; color: var(--text); width: 130px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hbar-track { flex: 1; height: 6px; background: var(--bdr); border-radius: 3px; overflow: hidden; }
+.hbar-fill { height: 100%; background: var(--gold); border-radius: 3px; width: 0; animation: growRight 0.6s ease-out forwards; }
+.hbar-fill.red { background: rgba(232,83,32,0.7); }
+@keyframes growRight { from { width: 0; } }
+.hbar-val { font-family: var(--mono); font-size: 10px; color: var(--text-muted); width: 50px; text-align: right; flex-shrink: 0; }
+
+/* outcome strip */
+.outcome-strip { display: flex; height: 16px; border-radius: 6px; overflow: hidden; gap: 2px; margin-bottom: 14px; }
+.outcome-seg   { border-radius: 4px; }
+
+.stat-row { display: flex; gap: 32px; flex-wrap: wrap; }
+.stat-block .stat-label { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px; }
+.stat-block .stat-val   { font-family: var(--serif); font-size: 28px; color: var(--gold); line-height: 1; }
+
+/* ─────────────────────────────────────────────
+   SETTINGS PANEL
+───────────────────────────────────────────── */
+#panel-settings { flex-direction: row; }
+.settings-sidebar {
+  width: 160px;
+  min-width: 160px;
+  background: var(--card-bg);
+  border-right: 1px solid var(--bdr);
+  flex-shrink: 0;
+}
+.settings-sidebar-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  display: block;
+  padding: 18px 16px 8px;
+}
+.settings-nav { padding: 0 6px; display: flex; flex-direction: column; gap: 1px; }
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  transition: background 0.12s;
+}
+.settings-item:hover { background: rgba(232,160,32,0.07); }
+.settings-item.active { background: var(--gold-pale); font-weight: 600; }
+.settings-icon { color: var(--text-muted); width: 14px; height: 14px; flex-shrink: 0; }
+.settings-item.active .settings-icon { color: var(--gold); }
+.settings-content { flex: 1; overflow-y: auto; }
+.settings-page { display: none; }
+.settings-page.active { display: block; }
+
+/* slider */
+.slider-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.slider-row input[type=range] { flex: 1; accent-color: var(--gold); cursor: pointer; }
+.slider-val { font-family: var(--mono); font-size: 12px; color: var(--gold); min-width: 52px; text-align: right; }
+
+/* segmented */
+.seg { display: flex; background: var(--bdr); border-radius: 8px; padding: 2px; gap: 2px; width: fit-content; margin-top: 8px; }
+.seg-btn {
+  padding: 5px 16px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.seg-btn.active { background: var(--win-bg); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+/* allowlist */
+.allowlist { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.allowlist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: var(--content-bg);
+  border: 1px solid var(--bdr);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+.allowlist-item span { flex: 1; }
+.allowlist-remove {
+  color: var(--text-faint);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+  transition: color 0.12s;
+}
+.allowlist-remove:hover { color: #E85320; }
+.allowlist-add-row { display: flex; gap: 8px; }
+.allowlist-add-btn {
+  background: none;
+  border: none;
+  color: var(--gold);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 4px;
+  transition: opacity 0.12s;
+}
+.allowlist-add-btn:hover { opacity: 0.7; }
+
+/* prompt editor */
+.prompt-editor {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--content-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-height: 90px;
+  width: 100%;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+  line-height: 1.5;
+}
+.prompt-editor:focus { border-color: var(--gold); }
+
+/* accent swatch */
+.accent-swatch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--content-bg);
+  border: 1px solid var(--bdr);
+  border-radius: 8px;
+}
+.swatch-box { width: 30px; height: 30px; border-radius: 6px; background: var(--gold); flex-shrink: 0; }
+.swatch-info strong { display: block; font-size: 12px; font-weight: 600; color: var(--text); }
+.swatch-info small  { font-size: 11px; color: var(--text-muted); }
+
+/* ─────────────────────────────────────────────
+   SAVED CONFIRM / TOAST
+───────────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 200;
+  pointer-events: none;
+}
+.toast {
+  background: var(--ink);
+  color: #EDE8DF;
+  border-radius: 8px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-family: var(--sans);
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+[data-theme="dark"] .toast { background: #EDE8DF; color: var(--ink); }
+
+.save-row { display: flex; align-items: center; gap: 12px; padding-top: 4px; flex-wrap: wrap; }
+.saved-confirm { display: none; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.saved-confirm.visible { display: flex; }
+.saved-confirm svg { color: var(--gold); }
+
+/* ─────────────────────────────────────────────
+   RESPONSIVE
+───────────────────────────────────────────── */
+@media (max-width: 680px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .stat-row { gap: 20px; }
+  .sidebar { width: 52px; min-width: 52px; }
+  .sidebar-brand-text { display: none; }
+  .nav-item { padding: 10px; justify-content: center; }
+  .nav-item .nav-label { display: none; }
+  .connector-sidebar, .settings-sidebar { width: 46px; min-width: 46px; }
+  .connector-sidebar-title { display: none; }
+  .connector-item, .settings-item { justify-content: center; padding: 10px; }
+  .connector-info, .settings-item .settings-label { display: none; }
+  .connector-dot { display: none; }
+  .settings-sidebar-label { display: none; }
+  .hbar-name { width: 80px; }
+}
+</style>
+</head>
+<body>
+
+<!-- demo bar -->
+<div class="demo-bar">
+  <div class="demo-bar-left">
+    <span class="demo-pill">Demo</span>
+    <span>Interactive Demo &middot; No installation &middot; Fake data only</span>
+  </div>
+  <a href="index.html">&larr; Back to site</a>
+</div>
+
+<!-- stage -->
+<div class="stage">
+  <div class="window">
+
+    <!-- title bar -->
+    <div class="titlebar">
+      <div class="traffic-lights">
+        <div class="tl tl-close"></div>
+        <div class="tl tl-min"></div>
+        <div class="tl tl-max"></div>
+      </div>
+      <span class="titlebar-label">Locus</span>
+    </div>
+
+    <!-- app body -->
+    <div class="app-body">
+
+      <!-- sidebar -->
+      <nav class="sidebar">
+        <div class="sidebar-brand">
+          <svg class="sidebar-brand-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="4" y="9" width="12" height="9" rx="2"/>
+            <path d="M7 9V6.5a3 3 0 1 1 6 0V9"/>
+          </svg>
+          <span class="sidebar-brand-text">Locus</span>
+        </div>
+        <div class="sidebar-nav">
+          <button class="nav-item active" data-panel="start">
+            <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.3 4.6a1 1 0 0 1 1.4 0l7 6.5a1 1 0 0 1 0 1.8l-7 6.5A1 1 0 0 1 6 18.5v-13a1 1 0 0 1 .3-.9z"/>
+            </svg>
+            <span class="nav-label">Start</span>
+          </button>
+          <button class="nav-item" data-panel="connectors">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/>
+              <line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
+            </svg>
+            <span class="nav-label">Connectors</span>
+          </button>
+          <button class="nav-item" data-panel="analytics">
+            <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M3 15h2V9H3v6zm4 0h2V6H7v9zm4 0h2V3h-2v12zm4 0h2v-5h-2v5z"/>
+            </svg>
+            <span class="nav-label">Analytics</span>
+          </button>
+          <button class="nav-item" data-panel="settings">
+            <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 0 1-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 0 1 .947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 0 1 2.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 0 1 2.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 0 1 .947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 0 1-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 0 1-2.287-.947zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" clip-rule="evenodd"/>
+            </svg>
+            <span class="nav-label">Settings</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- content -->
+      <div class="content">
+
+        <!-- ══════════════════════════════════
+             START PANEL
+        ══════════════════════════════════ -->
+        <div id="panel-start" class="panel active">
+          <div class="launcher-inner">
+
+            <div class="lock-circle" id="lockCircle">
+              <svg id="lockIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="5" y="11" width="14" height="11" rx="2"/>
+                <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+              </svg>
+            </div>
+
+            <div class="wordmark">Locus</div>
+
+            <div class="status-line" id="statusLine">
+              <span id="statusText">Ready to focus</span>
+            </div>
+
+            <!-- idle state -->
+            <div id="idleState" style="width:100%">
+              <div class="task-area">
+                <div class="task-area-label">What are you working on?</div>
+                <input id="customTaskInput" class="input" type="text" placeholder="e.g. Write essay intro" />
+                <button class="btn-primary wide" id="startCustomBtn" style="width:100%;margin-top:8px;" disabled>
+                  <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path d="M6.3 4.6a1 1 0 0 1 1.4 0l7 6.5a1 1 0 0 1 0 1.8l-7 6.5A1 1 0 0 1 6 18.5v-13a1 1 0 0 1 .3-.9z"/></svg>
+                  Start Session
+                </button>
+              </div>
+
+              <div class="or-divider" style="margin-top:18px">
+                <div class="or-line"></div>
+                <span>OR</span>
+                <div class="or-line"></div>
+              </div>
+
+              <div class="task-area" style="margin-top:8px">
+                <div class="task-area-label">From Notion</div>
+                <div class="event-list" id="eventList"></div>
+                <button class="btn-primary wide" id="startNotionBtn" style="width:100%;margin-top:10px;display:none;">
+                  <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path d="M6.3 4.6a1 1 0 0 1 1.4 0l7 6.5a1 1 0 0 1 0 1.8l-7 6.5A1 1 0 0 1 6 18.5v-13a1 1 0 0 1 .3-.9z"/></svg>
+                  Start Notion Session
+                </button>
+              </div>
+            </div>
+
+            <!-- session active state -->
+            <div id="sessionState" style="display:none;width:100%">
+              <div class="session-card">
+                <div class="session-task-title" id="sessionTitle"></div>
+                <div class="session-task-meta"  id="sessionMeta"></div>
+                <div class="session-timer"       id="sessionTimer">0:00:00</div>
+                <button class="btn-secondary danger" id="endSessionBtn" style="width:100%;">
+                  <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor"><rect x="4" y="4" width="12" height="12" rx="1.5"/></svg>
+                  End Session
+                </button>
+              </div>
+
+              <div class="block-tester">
+                <div class="block-tester-label">Try blocking a site (demo)</div>
+                <div class="site-btns">
+                  <button class="site-btn" data-site="youtube.com">youtube.com</button>
+                  <button class="site-btn" data-site="twitter.com">twitter.com</button>
+                  <button class="site-btn" data-site="reddit.com">reddit.com</button>
+                  <button class="site-btn" data-site="instagram.com">instagram.com</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div><!-- /panel-start -->
+
+        <!-- ══════════════════════════════════
+             CONNECTORS PANEL
+        ══════════════════════════════════ -->
+        <div id="panel-connectors" class="panel">
+
+          <div class="connector-sidebar">
+            <span class="connector-sidebar-title">Connectors</span>
+            <div class="connector-list">
+              <button class="connector-item active">
+                <svg class="connector-icon" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M4 3h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v10h10V5H5zm2 2h6v1H7V7zm0 3h6v1H7v-1zm0 3h4v1H7v-1z"/>
+                </svg>
+                <div class="connector-info">
+                  <div class="connector-name">Notion</div>
+                  <div class="connector-status" id="connectorStatusLabel">Not connected</div>
+                </div>
+                <div class="connector-dot" id="connectorDot"></div>
+              </button>
+            </div>
+          </div>
+
+          <div class="connector-detail">
+            <div class="page-header"><h2>Notion</h2><p>Connect your Notion planner to auto-populate focus sessions.</p></div>
+            <div class="scroll-area">
+
+              <div class="card">
+                <div class="toggle-row">
+                  <div class="toggle-row-label">
+                    <strong>Enable Notion</strong>
+                    <small>When off, Locus works entirely from custom tasks.</small>
+                  </div>
+                  <label class="toggle">
+                    <input type="checkbox" id="notionEnabledToggle" checked>
+                    <div class="toggle-track"></div>
+                    <div class="toggle-thumb"></div>
+                  </label>
+                </div>
+              </div>
+
+              <div class="card">
+                <span class="field-label">Account</span>
+                <div id="notionSignedOut">
+                  <button class="btn-primary" id="notionSignInBtn">
+                    <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M11 3a1 1 0 1 0 0 2h4v10h-4a1 1 0 1 0 0 2h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4zm-2.293 4.293a1 1 0 0 0-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 1 0 1.414 1.414l2-2a1 1 0 0 0 0-1.414l-2-2z"/>
+                    </svg>
+                    Sign in with Notion
+                  </button>
+                  <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Opens Notion in your browser. After authorizing, you'll bounce back to Locus.</p>
+                </div>
+                <div id="notionSignedIn" style="display:none;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="var(--gold)">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/>
+                    </svg>
+                    <span style="font-size:13px;font-weight:600;color:var(--text);">Connected</span>
+                    <span style="font-size:12px;color:var(--text-muted);flex:1;">— Demo Workspace</span>
+                    <button class="btn-secondary" id="notionDisconnectBtn" style="padding:5px 12px;font-size:12px;">Disconnect</button>
+                  </div>
+                  <span class="field-label" style="margin-top:8px;">Pulled assignments</span>
+                  <div class="notion-assignments" id="notionAssignmentsList"></div>
+                </div>
+              </div>
+
+              <div class="save-row">
+                <button class="btn-primary" id="notionSaveBtn">Save Changes</button>
+                <div class="saved-confirm" id="notionSavedConfirm">
+                  <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/>
+                  </svg>
+                  Saved
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /panel-connectors -->
+
+        <!-- ══════════════════════════════════
+             ANALYTICS PANEL
+        ══════════════════════════════════ -->
+        <div id="panel-analytics" class="panel">
+          <div class="page-header"><h2>Analytics</h2><p>Your focus activity and blocking patterns.</p></div>
+          <div class="scroll-area">
+
+            <div class="kpi-row">
+              <div class="kpi-card"><div class="kpi-label">Focus Today</div><div class="kpi-value">1h 43m</div><div class="kpi-sub">today</div></div>
+              <div class="kpi-card"><div class="kpi-label">Sessions Today</div><div class="kpi-value">3</div><div class="kpi-sub">today</div></div>
+              <div class="kpi-card"><div class="kpi-label">Streak</div><div class="kpi-value">6d</div><div class="kpi-sub">consecutive days</div></div>
+              <div class="kpi-card"><div class="kpi-label">Blocks Denied</div><div class="kpi-value">11</div><div class="kpi-sub">all-time</div></div>
+            </div>
+
+            <div class="card">
+              <span class="field-label">Daily Focus Time — Last 14 Days</span>
+              <div class="bar-chart" id="dailyBars"></div>
+              <div id="dailyLabels" style="display:flex;gap:3px;margin-top:4px;"></div>
+            </div>
+
+            <div class="card">
+              <span class="field-label">Session Starts by Hour of Day</span>
+              <div class="hour-chart" id="hourBars"></div>
+              <div id="hourLabels" style="display:flex;gap:2px;margin-top:3px;"></div>
+            </div>
+
+            <div class="card">
+              <span class="field-label">Top Apps by Screen Time (In-Session)</span>
+              <div id="appBars"></div>
+            </div>
+
+            <div class="card">
+              <span class="field-label">Top Domains Visited During Sessions</span>
+              <div id="domainBars"></div>
+            </div>
+
+            <div class="card">
+              <span class="field-label">Impulse Leaderboard — blocks you couldn't justify</span>
+              <div id="impulseBars"></div>
+            </div>
+
+            <div class="card">
+              <span class="field-label">Block Outcomes</span>
+              <div class="outcome-strip">
+                <div class="outcome-seg" style="width:52%;background:var(--gold);"></div>
+                <div class="outcome-seg" style="width:33%;background:rgba(232,83,32,0.7);"></div>
+                <div class="outcome-seg" style="width:15%;background:var(--text-faint);opacity:0.5;"></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);">
+                  <div style="width:10px;height:10px;border-radius:50%;background:var(--gold);flex-shrink:0;"></div>
+                  Approved
+                  <span style="margin-left:auto;font-family:var(--mono);font-weight:600;color:var(--gold);">24</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);">
+                  <div style="width:10px;height:10px;border-radius:50%;background:rgba(232,83,32,0.7);flex-shrink:0;"></div>
+                  Denied
+                  <span style="margin-left:auto;font-family:var(--mono);font-weight:600;color:var(--gold);">15</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);">
+                  <div style="width:10px;height:10px;border-radius:50%;background:var(--text-faint);opacity:0.5;flex-shrink:0;"></div>
+                  Canceled
+                  <span style="margin-left:auto;font-family:var(--mono);font-weight:600;color:var(--gold);">7</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <span class="field-label">Session Length Distribution</span>
+              <div class="bar-chart" id="histoBars" style="height:90px;"></div>
+              <div id="histoLabels" style="display:flex;gap:3px;margin-top:4px;"></div>
+            </div>
+
+            <div class="card">
+              <span class="field-label" style="margin-bottom:14px;">All-Time Totals</span>
+              <div class="stat-row">
+                <div class="stat-block"><div class="stat-label">Focus Time</div><div class="stat-val">31h 12m</div></div>
+                <div class="stat-block"><div class="stat-label">Sessions</div><div class="stat-val">47</div></div>
+                <div class="stat-block"><div class="stat-label">Avg Session</div><div class="stat-val">39m</div></div>
+                <div class="stat-block"><div class="stat-label">Blocks</div><div class="stat-val">46</div></div>
+                <div class="stat-block"><div class="stat-label">Off-Topic</div><div class="stat-val">18</div></div>
+              </div>
+            </div>
+
+          </div>
+        </div><!-- /panel-analytics -->
+
+        <!-- ══════════════════════════════════
+             SETTINGS PANEL
+        ══════════════════════════════════ -->
+        <div id="panel-settings" class="panel">
+
+          <div class="settings-sidebar">
+            <span class="settings-sidebar-label">Settings</span>
+            <div class="settings-nav">
+              <button class="settings-item active" data-spage="general">
+                <svg class="settings-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M3 5h14v1H3zm0 4h14v1H3zm0 4h10v1H3z"/></svg>
+                <span class="settings-label">General</span>
+              </button>
+              <button class="settings-item" data-spage="blocking">
+                <svg class="settings-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2l6 3v5c0 3.5-2.5 6.8-6 8-3.5-1.2-6-4.5-6-8V5l6-3z"/></svg>
+                <span class="settings-label">Blocking</span>
+              </button>
+              <button class="settings-item" data-spage="allowlists">
+                <svg class="settings-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M4 4h12v2H4zm0 5h12v2H4zm0 5h8v2H4z"/></svg>
+                <span class="settings-label">Allowlists</span>
+              </button>
+              <button class="settings-item" data-spage="notifications">
+                <svg class="settings-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a6 6 0 0 0-6 6v3l-1.7 2.6A1 1 0 0 0 3 15h14a1 1 0 0 0 .7-1.4L16 11V8a6 6 0 0 0-6-6zm0 16a2 2 0 0 0 2-2H8a2 2 0 0 0 2 2z"/></svg>
+                <span class="settings-label">Notifications</span>
+              </button>
+              <button class="settings-item" data-spage="advanced">
+                <svg class="settings-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 5h4l2 4H2zm14 0h-4l-2 4h6zm-7 4v9m0-9l-3 5m3-5l3 5"/></svg>
+                <span class="settings-label">Advanced</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-content">
+
+            <!-- General -->
+            <div class="settings-page active" id="spage-general">
+              <div class="page-header"><h2>General</h2><p>Appearance and global preferences.</p></div>
+              <div class="scroll-area">
+                <div class="card">
+                  <span class="field-label">Appearance</span>
+                  <div class="seg" id="appearanceSeg">
+                    <button class="seg-btn" data-val="system">System</button>
+                    <button class="seg-btn active" data-val="light">Light</button>
+                    <button class="seg-btn" data-val="dark">Dark</button>
+                  </div>
+                  <div class="accent-swatch">
+                    <div class="swatch-box"></div>
+                    <div class="swatch-info">
+                      <strong>Accent colour</strong>
+                      <small>Warm amber — fixed</small>
+                    </div>
+                  </div>
+                </div>
+                <div class="save-row">
+                  <button class="btn-primary" onclick="triggerSave('generalSaved')">Save Changes</button>
+                  <div class="saved-confirm" id="generalSaved">
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/></svg>
+                    Saved
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Blocking -->
+            <div class="settings-page" id="spage-blocking">
+              <div class="page-header"><h2>Blocking</h2><p>Timing, polling, and AI strictness.</p></div>
+              <div class="scroll-area">
+                <div class="card">
+                  <div style="margin-bottom:18px;">
+                    <span class="field-label">Temporary Allow Duration</span>
+                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">How long a temporary override lasts before the site/app is re-blocked.</p>
+                    <div class="slider-row">
+                      <input type="range" min="5" max="120" step="5" value="15" id="tempAllowSlider">
+                      <span class="slider-val" id="tempAllowVal">15 min</span>
+                    </div>
+                  </div>
+                  <div style="border-top:1px solid var(--bdr);padding-top:18px;margin-bottom:18px;">
+                    <span class="field-label">Schedule Refresh</span>
+                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">How often Notion events are re-fetched in the background.</p>
+                    <div class="slider-row">
+                      <input type="range" min="1" max="60" step="1" value="30" id="scheduleRefreshSlider">
+                      <span class="slider-val" id="scheduleRefreshVal">30 min</span>
+                    </div>
+                  </div>
+                  <div style="border-top:1px solid var(--bdr);padding-top:18px;margin-bottom:18px;">
+                    <span class="field-label">URL Poll Interval</span>
+                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">How often Chrome tabs are checked for blocked domains.</p>
+                    <div class="slider-row">
+                      <input type="range" min="1" max="10" step="1" value="3" id="urlPollSlider">
+                      <span class="slider-val" id="urlPollVal">3 s</span>
+                    </div>
+                  </div>
+                  <div style="border-top:1px solid var(--bdr);padding-top:18px;">
+                    <span class="field-label">App Poll Interval</span>
+                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">How often running apps are checked against the blocklist.</p>
+                    <div class="slider-row">
+                      <input type="range" min="5" max="60" step="5" value="10" id="appPollSlider">
+                      <span class="slider-val" id="appPollVal">10 s</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <span class="field-label">Override Code</span>
+                  <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Typed to bypass the lock. Default is "bob".</p>
+                  <input class="input" type="password" value="bob" id="overrideCodeInput" style="font-family:var(--mono);" placeholder="Override code">
+                </div>
+
+                <div class="card">
+                  <span class="field-label">AI Harshness</span>
+                  <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Controls how strictly the AI evaluates your justifications.</p>
+                  <div class="seg" id="harshnessGrp">
+                    <button class="seg-btn" data-val="Lenient">Lenient</button>
+                    <button class="seg-btn active" data-val="Standard">Standard</button>
+                    <button class="seg-btn" data-val="Strict">Strict</button>
+                  </div>
+                  <p id="harshnessNote" style="font-size:11px;color:var(--text-muted);margin-top:8px;">Balanced — default behaviour.</p>
+                </div>
+
+                <div class="save-row">
+                  <button class="btn-primary" onclick="triggerSave('blockingSaved')">Save Changes</button>
+                  <div class="saved-confirm" id="blockingSaved">
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/></svg>
+                    Saved
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Allowlists -->
+            <div class="settings-page" id="spage-allowlists">
+              <div class="page-header"><h2>Allowlists</h2><p>Always-allowed apps and domains, regardless of session.</p></div>
+              <div class="scroll-area">
+                <div class="card">
+                  <span class="field-label">Always-Allowed Apps</span>
+                  <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">These apps are never blocked even outside the session whitelist.</p>
+                  <div class="allowlist" id="appAllowlist"></div>
+                  <div class="allowlist-add-row">
+                    <input class="input" id="newAppInput" type="text" placeholder="App name (e.g. Notion)" style="font-family:var(--mono);font-size:12px;">
+                    <button class="allowlist-add-btn" id="addAppBtn">+</button>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="field-label">Always-Allowed Domains</span>
+                  <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">These domains are never blocked in Chrome.</p>
+                  <div class="allowlist" id="domainAllowlist"></div>
+                  <div class="allowlist-add-row">
+                    <input class="input" id="newDomainInput" type="text" placeholder="Domain (e.g. schoology.com)" style="font-family:var(--mono);font-size:12px;">
+                    <button class="allowlist-add-btn" id="addDomainBtn">+</button>
+                  </div>
+                </div>
+                <div class="save-row">
+                  <button class="btn-primary" onclick="triggerSave('allowlistSaved')">Save Changes</button>
+                  <div class="saved-confirm" id="allowlistSaved">
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/></svg>
+                    Saved
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Notifications -->
+            <div class="settings-page" id="spage-notifications">
+              <div class="page-header"><h2>Notifications</h2><p>Control what macOS notifications Locus sends.</p></div>
+              <div class="scroll-area">
+                <div class="card">
+                  <div class="toggle-row">
+                    <div class="toggle-row-label">
+                      <strong>Show Notifications</strong>
+                      <small>Displays banners like "Evaluating your reason…" and "Override accepted".</small>
+                    </div>
+                    <label class="toggle">
+                      <input type="checkbox" id="notifToggle" checked>
+                      <div class="toggle-track"></div>
+                      <div class="toggle-thumb"></div>
+                    </label>
+                  </div>
+                  <div class="toggle-row">
+                    <div class="toggle-row-label">
+                      <strong>Play Sound on Block</strong>
+                      <small>Plays a system sound when a block is triggered.</small>
+                    </div>
+                    <label class="toggle">
+                      <input type="checkbox" id="soundToggle">
+                      <div class="toggle-track"></div>
+                      <div class="toggle-thumb"></div>
+                    </label>
+                  </div>
+                </div>
+                <div class="save-row">
+                  <button class="btn-primary" onclick="triggerSave('notifSaved')">Save Changes</button>
+                  <div class="saved-confirm" id="notifSaved">
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/></svg>
+                    Saved
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Advanced -->
+            <div class="settings-page" id="spage-advanced">
+              <div class="page-header"><h2>Advanced</h2><p>AI prompt overrides, polling, and debug options.</p></div>
+              <div class="scroll-area">
+                <div class="card">
+                  <div class="toggle-row">
+                    <div class="toggle-row-label">
+                      <strong>Debug Logging</strong>
+                      <small>Enables verbose print output in the Python backend.</small>
+                    </div>
+                    <label class="toggle">
+                      <input type="checkbox" id="debugToggle">
+                      <div class="toggle-track"></div>
+                      <div class="toggle-thumb"></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <span class="field-label">Evaluate Reason Prompt</span>
+                  <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Used when the user submits a justification for a blocked site/app.</p>
+                  <p style="font-family:var(--mono);font-size:10px;color:var(--text-faint);margin-bottom:8px;">Placeholders: {session_name}, {subject_type}, {subject}, {reason}</p>
+                  <textarea class="prompt-editor" id="promptReason" placeholder="Leave empty to use the built-in default prompt."></textarea>
+                </div>
+
+                <div class="card">
+                  <span class="field-label">Evaluate Site Relevance Prompt</span>
+                  <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Used to pre-screen whether a blocked domain is obviously relevant.</p>
+                  <p style="font-family:var(--mono);font-size:10px;color:var(--text-faint);margin-bottom:8px;">Placeholders: {session_name}, {domain}, {title_hint}</p>
+                  <textarea class="prompt-editor" id="promptSite" placeholder="Leave empty to use the built-in default prompt."></textarea>
+                </div>
+
+                <div class="save-row">
+                  <button class="btn-primary" onclick="triggerSave('advancedSaved')">Save Changes</button>
+                  <div class="saved-confirm" id="advancedSaved">
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/></svg>
+                    Saved
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div><!-- /panel-settings -->
+
+      </div><!-- /content -->
+    </div><!-- /app-body -->
+  </div><!-- /window -->
+</div><!-- /stage -->
+
+<!-- block overlay -->
+<div class="overlay" id="blockOverlay">
+  <div class="block-modal">
+    <div class="block-modal-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+      </svg>
+    </div>
+    <h3>Site blocked</h3>
+    <div class="domain" id="blockedDomain">youtube.com</div>
+    <label for="blockReasonInput">Why do you need access?</label>
+    <textarea class="block-reason-input" id="blockReasonInput" placeholder="e.g. I need to watch a lecture video for my AP class…"></textarea>
+    <div class="typing-dots" id="typingDots">
+      <span></span><span></span><span></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-left:8px;animation:none;">Evaluating…</span>
+    </div>
+    <div class="verdict" id="verdictBox"></div>
+    <div class="block-modal-actions" id="blockModalActions">
+      <button class="btn-secondary" id="blockCancelBtn">Cancel</button>
+      <button class="btn-primary" id="blockSubmitBtn">Submit reason</button>
+    </div>
+  </div>
+</div>
+
+<!-- toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+/* ─────────────────────────────────────────────
+   FAKE DATA
+───────────────────────────────────────────── */
+const FAKE_EVENTS = [
+  { title:"Chapter 8 Reading Notes",      class_name:"Pre-AP",    event_type:"Assignment", date:"2026-04-23" },
+  { title:"Lab Report: Enzyme Kinetics",  class_name:"Biology",   event_type:"Assignment", date:"2026-04-23" },
+  { title:"Practice Set 12 — Integrals",  class_name:"Math",      event_type:"Assignment", date:"2026-04-24" },
+  { title:"Civil War DBQ Essay",           class_name:"History",   event_type:"Assignment", date:"2026-04-24" },
+  { title:"Unit 5 Vocab Worksheet",        class_name:"Spanish",   event_type:"Assignment", date:"2026-04-25" },
+  { title:"AP Exam — Free Response",       class_name:"Pre-AP",    event_type:"Exam",       date:"2026-04-26" },
+  { title:"Supply & Demand Quiz",          class_name:"Economics", event_type:"Exam",       date:"2026-04-26" },
+  { title:"Create-PT Milestone 3",         class_name:"CSP",       event_type:"Assignment", date:"2026-04-28" },
+  { title:"Mitosis Lab Practical",         class_name:"Biology",   event_type:"Exam",       date:"2026-04-29" },
+];
+
+const TAG_CLASS = {
+  "Pre-AP":"tag-preap","Biology":"tag-bio","CSP":"tag-csp","Math":"tag-math",
+  "Spanish":"tag-spanish","History":"tag-history","Economics":"tag-econ"
+};
+
+const DAILY_DATA = [
+  {d:"4/9",m:22},{d:"4/10",m:48},{d:"4/11",m:0},{d:"4/12",m:35},
+  {d:"4/13",m:67},{d:"4/14",m:92},{d:"4/15",m:55},{d:"4/16",m:0},
+  {d:"4/17",m:74},{d:"4/18",m:103},{d:"4/19",m:45},{d:"4/20",m:88},
+  {d:"4/21",m:61},{d:"4/22",m:103}
+];
+const HOUR_DATA   = [0,0,0,0,0,0,0,1,2,5,8,6,4,7,9,8,6,5,4,3,2,1,0,0];
+const APP_DATA    = [
+  {name:"Notion",val:"1h 14m",frac:0.9},{name:"Chrome",val:"48m",frac:0.62},
+  {name:"Xcode",val:"32m",frac:0.41},{name:"Terminal",val:"28m",frac:0.36},
+  {name:"Preview",val:"18m",frac:0.23},{name:"Pages",val:"14m",frac:0.18}
+];
+const DOMAIN_DATA = [
+  {name:"schoology.com",val:"41",frac:0.9},{name:"khanacademy.org",val:"28",frac:0.61},
+  {name:"docs.google.com",val:"22",frac:0.48},{name:"jstor.org",val:"15",frac:0.33},
+  {name:"github.com",val:"12",frac:0.26}
+];
+const IMPULSE_DATA = [
+  {name:"youtube.com",val:"7",frac:1.0},{name:"reddit.com",val:"5",frac:0.71},
+  {name:"twitter.com",val:"3",frac:0.43},{name:"instagram.com",val:"2",frac:0.29},
+  {name:"twitch.tv",val:"1",frac:0.14}
+];
+const HISTO_DATA = [
+  {label:"0–15m",frac:0.19},{label:"15–30m",frac:0.56},{label:"30–60m",frac:1.0},
+  {label:"60–120m",frac:0.75},{label:"120m+",frac:0.25}
+];
+const FAKE_APPS    = ["Notion","Xcode","Terminal","Messages","Calendar"];
+const FAKE_DOMAINS = ["schoology.com","khanacademy.org","collegeboard.org"];
+
+/* ─────────────────────────────────────────────
+   STATE
+───────────────────────────────────────────── */
+const state = {
+  session: null,
+  timerInterval: null,
+  selectedEventIdx: null,
+  notionConnected: false,
+  blockSite: null,
+  appAllowlist: [...FAKE_APPS],
+  domainAllowlist: [...FAKE_DOMAINS],
+  harshness: 'Standard',
+};
+
+/* ─────────────────────────────────────────────
+   TAB SWITCHING
+───────────────────────────────────────────── */
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+    if (btn.dataset.panel === 'analytics') initAnalytics();
+  });
+});
+
+/* ─────────────────────────────────────────────
+   SETTINGS SUB-NAV
+───────────────────────────────────────────── */
+document.querySelectorAll('.settings-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.settings-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.settings-page').forEach(p => p.classList.remove('active'));
+    document.getElementById('spage-' + btn.dataset.spage).classList.add('active');
+  });
+});
+
+/* ─────────────────────────────────────────────
+   EVENT LIST
+───────────────────────────────────────────── */
+function buildEventList() {
+  const list = document.getElementById('eventList');
+  list.innerHTML = '';
+  let lastDate = null;
+  FAKE_EVENTS.forEach((ev, idx) => {
+    if (ev.date !== lastDate) {
+      const dh = document.createElement('div');
+      dh.className = 'date-header';
+      dh.textContent = dateLabel(ev.date);
+      list.appendChild(dh);
+      lastDate = ev.date;
+    }
+    const row = document.createElement('div');
+    const sel = state.selectedEventIdx === idx;
+    row.className = 'event-row' + (sel ? ' selected' : '');
+
+    const docIcon = ev.event_type === 'Exam'
+      ? '<path d="M9 2a1 1 0 0 0 0 2h2a1 1 0 1 0 0-2H9zm-3 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H6zM7 8h6v1H7V8zm0 3h6v1H7v-1zm0 3h3v1H7v-1z"/>'
+      : '<path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4zm2 6a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1zm1 3a1 1 0 1 0 0 2h4a1 1 0 1 0 0-2H7z" clip-rule="evenodd"/>';
+
+    row.innerHTML = `
+      <svg class="event-row-icon" viewBox="0 0 20 20" fill="currentColor">${docIcon}</svg>
+      <div class="event-row-body">
+        <div class="event-row-title">${ev.title}</div>
+        <div class="event-row-class"><span class="class-tag ${TAG_CLASS[ev.class_name]||''}">${ev.class_name}</span></div>
+      </div>
+      <svg class="event-check" viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clip-rule="evenodd"/>
+      </svg>`;
+    row.addEventListener('click', () => {
+      state.selectedEventIdx = idx;
+      buildEventList();
+      document.getElementById('startNotionBtn').style.display = 'flex';
+    });
+    list.appendChild(row);
+  });
+}
+
+function dateLabel(ds) {
+  const today = new Date('2026-04-23T12:00:00');
+  const d = new Date(ds + 'T12:00:00');
+  const diff = Math.round((d - today) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+}
+
+buildEventList();
+
+/* ─────────────────────────────────────────────
+   SESSION
+───────────────────────────────────────────── */
+function startSession(title, meta) {
+  state.session = { title, meta, startTime: Date.now() };
+  document.getElementById('idleState').style.display = 'none';
+  document.getElementById('sessionState').style.display = 'block';
+  document.getElementById('sessionTitle').textContent = title;
+  document.getElementById('sessionMeta').textContent = meta;
+  document.getElementById('lockCircle').classList.add('session-active');
+  document.getElementById('statusLine').innerHTML =
+    '<div class="status-dot"></div><span>' + title + '</span>';
+  updateTimer();
+  state.timerInterval = setInterval(updateTimer, 1000);
+  showToast('Session started');
+}
+
+function updateTimer() {
+  const s = Math.floor((Date.now() - state.session.startTime) / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  document.getElementById('sessionTimer').textContent =
+    `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+function endSession() {
+  clearInterval(state.timerInterval);
+  state.session = null;
+  state.selectedEventIdx = null;
+  document.getElementById('idleState').style.display = 'block';
+  document.getElementById('sessionState').style.display = 'none';
+  document.getElementById('lockCircle').classList.remove('session-active');
+  document.getElementById('statusLine').innerHTML = '<span>Ready to focus</span>';
+  buildEventList();
+  document.getElementById('startNotionBtn').style.display = 'none';
+  showToast('Session ended');
+}
+
+// custom task
+const customInput   = document.getElementById('customTaskInput');
+const startCustomBtn = document.getElementById('startCustomBtn');
+customInput.addEventListener('input', () => {
+  startCustomBtn.disabled = !customInput.value.trim();
+});
+startCustomBtn.addEventListener('click', () => {
+  const t = customInput.value.trim();
+  if (!t) return;
+  customInput.value = ''; startCustomBtn.disabled = true;
+  startSession(t, 'Custom task');
+});
+customInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && customInput.value.trim()) startCustomBtn.click();
+});
+
+// notion session
+document.getElementById('startNotionBtn').addEventListener('click', () => {
+  const idx = state.selectedEventIdx;
+  if (idx === null) return;
+  const ev = FAKE_EVENTS[idx];
+  startSession(ev.title, ev.class_name + ' · ' + ev.event_type);
+});
+
+// end
+document.getElementById('endSessionBtn').addEventListener('click', endSession);
+
+/* ─────────────────────────────────────────────
+   BLOCK OVERLAY
+───────────────────────────────────────────── */
+document.querySelectorAll('.site-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!state.session) return;
+    state.blockSite = btn.dataset.site;
+    openBlockOverlay(state.blockSite);
+  });
+});
+
+function openBlockOverlay(domain) {
+  document.getElementById('blockedDomain').textContent = domain;
+  document.getElementById('blockReasonInput').value = '';
+  document.getElementById('typingDots').classList.remove('visible');
+  document.getElementById('verdictBox').className = 'verdict';
+  document.getElementById('verdictBox').innerHTML = '';
+  document.getElementById('blockModalActions').style.display = 'flex';
+  document.getElementById('blockOverlay').classList.add('visible');
+  setTimeout(() => document.getElementById('blockReasonInput').focus(), 80);
+}
+
+document.getElementById('blockCancelBtn').addEventListener('click', () => {
+  document.getElementById('blockOverlay').classList.remove('visible');
+  showToast('Request canceled');
+});
+
+document.getElementById('blockSubmitBtn').addEventListener('click', submitBlockReason);
+document.getElementById('blockReasonInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitBlockReason(); }
+});
+
+function submitBlockReason() {
+  const reason = document.getElementById('blockReasonInput').value.trim();
+  if (!reason) return;
+  document.getElementById('blockModalActions').style.display = 'none';
+  document.getElementById('typingDots').classList.add('visible');
+  setTimeout(() => {
+    document.getElementById('typingDots').classList.remove('visible');
+    const granted = evaluateReason(reason, state.session ? state.session.title : '');
+    const box = document.getElementById('verdictBox');
+    if (granted) {
+      box.className = 'verdict granted visible';
+      box.innerHTML = '<div class="verdict-title">Access granted</div>Your reason is relevant to the current session. Temporarily allowed for 15 minutes.';
+      showToast('Access granted');
+    } else {
+      box.className = 'verdict denied visible';
+      box.innerHTML = '<div class="verdict-title">Access denied</div>This doesn\'t appear directly relevant to your current task. Stay focused.';
+      showToast('Access denied');
+    }
+    setTimeout(() => document.getElementById('blockOverlay').classList.remove('visible'), 2800);
+  }, 1500 + Math.random() * 700);
+}
+
+function evaluateReason(reason, sessionTitle) {
+  const r = reason.toLowerCase(), t = sessionTitle.toLowerCase();
+  const academic = ['lecture','research','study','assignment','class','homework','project',
+    'essay','lab','reading','notes','review','exam','chapter','textbook','article','source',
+    'reference','write','writing','cite','citation','video','tutorial'];
+  const titleWords = t.split(/\s+/).slice(0,4).filter(w => w.length > 3);
+  const hasAcademic = academic.some(w => r.includes(w));
+  const hasTaskMatch = titleWords.some(w => r.includes(w));
+  if (state.harshness === 'Lenient') return hasAcademic || hasTaskMatch || r.length > 28;
+  if (state.harshness === 'Strict')  return hasAcademic && hasTaskMatch;
+  return hasAcademic || hasTaskMatch;
+}
+
+/* ─────────────────────────────────────────────
+   CONNECTORS
+───────────────────────────────────────────── */
+document.getElementById('notionSignInBtn').addEventListener('click', () => {
+  const btn = document.getElementById('notionSignInBtn');
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+  setTimeout(() => {
+    state.notionConnected = true;
+    updateNotionUI();
+    showToast('Notion connected');
+  }, 1300);
+});
+
+document.getElementById('notionDisconnectBtn').addEventListener('click', () => {
+  state.notionConnected = false;
+  updateNotionUI();
+  showToast('Notion disconnected');
+});
+
+document.getElementById('notionSaveBtn').addEventListener('click', () => {
+  triggerSave('notionSavedConfirm');
+});
+
+function updateNotionUI() {
+  const dot   = document.getElementById('connectorDot');
+  const label = document.getElementById('connectorStatusLabel');
+  if (state.notionConnected) {
+    dot.classList.add('on');
+    label.textContent = 'Connected';
+    label.className = 'connector-status connected';
+    document.getElementById('notionSignedOut').style.display = 'none';
+    document.getElementById('notionSignedIn').style.display = 'block';
+    buildNotionAssignments();
+  } else {
+    dot.classList.remove('on');
+    label.textContent = 'Not connected';
+    label.className = 'connector-status';
+    document.getElementById('notionSignedOut').style.display = 'block';
+    document.getElementById('notionSignedIn').style.display = 'none';
+    const btn = document.getElementById('notionSignInBtn');
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 1 0 0 2h4v10h-4a1 1 0 1 0 0 2h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4zm-2.293 4.293a1 1 0 0 0-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 1 0 1.414 1.414l2-2a1 1 0 0 0 0-1.414l-2-2z"/></svg> Sign in with Notion`;
+  }
+}
+
+function buildNotionAssignments() {
+  const list = document.getElementById('notionAssignmentsList');
+  list.innerHTML = '';
+  FAKE_EVENTS.slice(0, 6).forEach(ev => {
+    const row = document.createElement('div');
+    row.className = 'notion-assignment-row';
+    row.innerHTML = `
+      <span class="class-tag ${TAG_CLASS[ev.class_name]||''}">${ev.class_name}</span>
+      <span class="na-title">${ev.title}</span>
+      <span class="na-date">${ev.date.slice(5).replace('-','/')}</span>`;
+    list.appendChild(row);
+  });
+}
+
+/* ─────────────────────────────────────────────
+   ANALYTICS
+───────────────────────────────────────────── */
+let analyticsInited = false;
+function initAnalytics() {
+  if (analyticsInited) return;
+  analyticsInited = true;
+
+  // daily bars
+  const maxM = Math.max(...DAILY_DATA.map(d => d.m));
+  const dailyEl = document.getElementById('dailyBars');
+  const labelsEl = document.getElementById('dailyLabels');
+  DAILY_DATA.forEach((d, i) => {
+    const col = document.createElement('div');
+    col.className = 'bar-col';
+    const h = Math.max(2, Math.round((d.m / maxM) * 110));
+    col.innerHTML = `<div class="bar${d.m===0?' muted':''}" style="height:${h}px;animation-delay:${i*25}ms;"></div>`;
+    dailyEl.appendChild(col);
+
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'flex:1;text-align:center;font-family:var(--mono);font-size:8px;color:var(--text-faint);';
+    lbl.textContent = i % 2 === 0 ? d.d : '';
+    labelsEl.appendChild(lbl);
+  });
+
+  // hour bars
+  const maxH = Math.max(...HOUR_DATA);
+  const hourEl  = document.getElementById('hourBars');
+  const hLabels = document.getElementById('hourLabels');
+  HOUR_DATA.forEach((v, h) => {
+    const col = document.createElement('div');
+    col.className = 'hour-col';
+    const bh = Math.max(1, Math.round((v / maxH) * 70));
+    col.innerHTML = `<div class="hour-bar" style="height:${bh}px;animation-delay:${h*15}ms;"></div>`;
+    hourEl.appendChild(col);
+
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'flex:1;text-align:center;font-family:var(--mono);font-size:7px;color:var(--text-faint);';
+    lbl.textContent = h % 4 === 0 ? hourLabel(h) : '';
+    hLabels.appendChild(lbl);
+  });
+
+  buildHBars('appBars',     APP_DATA,     false);
+  buildHBars('domainBars',  DOMAIN_DATA,  false);
+  buildHBars('impulseBars', IMPULSE_DATA, true);
+
+  // histogram
+  const histoEl = document.getElementById('histoBars');
+  const histoLbl = document.getElementById('histoLabels');
+  HISTO_DATA.forEach((d, i) => {
+    const col = document.createElement('div');
+    col.className = 'bar-col';
+    const bh = Math.max(2, Math.round(d.frac * 80));
+    col.innerHTML = `<div class="bar" style="height:${bh}px;animation-delay:${i*60}ms;background:rgba(232,160,32,0.8);"></div>`;
+    histoEl.appendChild(col);
+
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'flex:1;text-align:center;font-family:var(--mono);font-size:8px;color:var(--text-faint);';
+    lbl.textContent = d.label;
+    histoLbl.appendChild(lbl);
+  });
+}
+
+function buildHBars(id, data, red) {
+  const el = document.getElementById(id);
+  data.forEach((row, i) => {
+    const div = document.createElement('div');
+    div.className = 'hbar-row';
+    div.innerHTML = `
+      <div class="hbar-name">${row.name}</div>
+      <div class="hbar-track"><div class="hbar-fill${red?' red':''}" style="width:${Math.round(row.frac*100)}%;animation-delay:${i*50}ms;"></div></div>
+      <div class="hbar-val">${row.val}</div>`;
+    el.appendChild(div);
+  });
+}
+
+function hourLabel(h) {
+  if (h === 0) return '12a';
+  if (h === 12) return '12p';
+  return h < 12 ? h+'a' : (h-12)+'p';
+}
+
+/* ─────────────────────────────────────────────
+   SLIDERS
+───────────────────────────────────────────── */
+function bindSlider(id, valId, unit) {
+  const s = document.getElementById(id), v = document.getElementById(valId);
+  if (!s || !v) return;
+  s.addEventListener('input', () => v.textContent = s.value + ' ' + unit);
+}
+bindSlider('tempAllowSlider',       'tempAllowVal',       'min');
+bindSlider('scheduleRefreshSlider', 'scheduleRefreshVal', 'min');
+bindSlider('urlPollSlider',         'urlPollVal',         's');
+bindSlider('appPollSlider',         'appPollVal',         's');
+
+/* ─────────────────────────────────────────────
+   APPEARANCE SEG
+───────────────────────────────────────────── */
+document.getElementById('appearanceSeg').addEventListener('click', e => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  document.querySelectorAll('#appearanceSeg .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const val = btn.dataset.val;
+  const theme = val === 'dark' ? 'dark'
+    : val === 'light' ? 'light'
+    : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem('locus-demo-theme', theme); } catch(e){}
+});
+
+/* ─────────────────────────────────────────────
+   HARSHNESS SEG
+───────────────────────────────────────────── */
+document.getElementById('harshnessGrp').addEventListener('click', e => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  document.querySelectorAll('#harshnessGrp .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.harshness = btn.dataset.val;
+  const notes = {
+    Lenient:  'More forgiving — gives benefit of the doubt on most reasons.',
+    Standard: 'Balanced — default behaviour.',
+    Strict:   'Pickier — requires clear, direct relevance to the session subject.',
+  };
+  document.getElementById('harshnessNote').textContent = notes[state.harshness];
+});
+
+/* ─────────────────────────────────────────────
+   ALLOWLISTS
+───────────────────────────────────────────── */
+function renderAllowlist(containerId, items, onRemove) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  if (!items.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-faint);padding:4px 0;">No entries yet.</div>';
+    return;
+  }
+  items.forEach((item, idx) => {
+    const div = document.createElement('div');
+    div.className = 'allowlist-item';
+    div.innerHTML = `<span>${item}</span><button class="allowlist-remove" title="Remove">&times;</button>`;
+    div.querySelector('.allowlist-remove').addEventListener('click', () => { onRemove(idx); });
+    el.appendChild(div);
+  });
+}
+
+function refreshAllowlists() {
+  renderAllowlist('appAllowlist', state.appAllowlist, i => {
+    state.appAllowlist.splice(i, 1); refreshAllowlists();
+  });
+  renderAllowlist('domainAllowlist', state.domainAllowlist, i => {
+    state.domainAllowlist.splice(i, 1); refreshAllowlists();
+  });
+}
+refreshAllowlists();
+
+document.getElementById('addAppBtn').addEventListener('click', () => {
+  const inp = document.getElementById('newAppInput');
+  const val = inp.value.trim();
+  if (!val || state.appAllowlist.includes(val)) return;
+  state.appAllowlist.push(val); inp.value = ''; refreshAllowlists();
+});
+document.getElementById('newAppInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addAppBtn').click();
+});
+
+document.getElementById('addDomainBtn').addEventListener('click', () => {
+  const inp = document.getElementById('newDomainInput');
+  const val = inp.value.trim();
+  if (!val || state.domainAllowlist.includes(val)) return;
+  state.domainAllowlist.push(val); inp.value = ''; refreshAllowlists();
+});
+document.getElementById('newDomainInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addDomainBtn').click();
+});
+
+/* ─────────────────────────────────────────────
+   SAVE + TOAST
+───────────────────────────────────────────── */
+function triggerSave(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('visible');
+  showToast('Settings saved');
+  setTimeout(() => el.classList.remove('visible'), 2200);
+}
+
+function showToast(msg) {
+  const container = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  container.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('show')));
+  setTimeout(() => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 250);
+  }, 2000);
+}
+
+/* ─────────────────────────────────────────────
+   THEME PERSISTENCE
+───────────────────────────────────────────── */
+try {
+  const saved = localStorage.getItem('locus-demo-theme');
+  if (saved) {
+    document.documentElement.setAttribute('data-theme', saved);
+    document.querySelectorAll('#appearanceSeg .seg-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.val === saved);
+    });
+  }
+} catch(e){}
+
+/* ─────────────────────────────────────────────
+   KEYBOARD
+───────────────────────────────────────────── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('blockOverlay').classList.contains('visible')) {
+    document.getElementById('blockOverlay').classList.remove('visible');
+  }
+});
+</script>
+</body>
+</html>

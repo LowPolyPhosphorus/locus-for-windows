@@ -1,0 +1,35 @@
+{
+  "_comment_ai" : "AI evaluation uses Hack Club AI (Gemini 2.5 Flash) — key is baked in",
+  "_comment_always_allowed_apps" : "Always allowed regardless of session: Finder, Chrome, Terminal (hardcoded in app_blocker.py)",
+  "_comment_mode" : "WHITELIST mode — everything is blocked unless listed here or in ALWAYS_ALLOWED (see app_blocker.py)",
+  "_comment_override" : "First 100 digits of pi, no decimal point",
+  "activities" : {
+    "DEFAULT" : {
+      "allow_apps" : [],
+      "allow_domains" : [],
+      "open_apps" : []
+    }
+  },
+  "always_allowed_apps" : [],
+  "always_allowed_domains" : [],
+  "api_keys" : {
+    "notion" : "YOUR_NOTION_INTEGRATION_TOKEN_HERE"
+  },
+  "app_poll_interval_seconds" : 15,
+  "appearance" : "system",
+  "debug_logging" : false,
+  "harshness" : "Standard",
+  "notion_database_id" : "YOUR_NOTION_DATABASE_ID_HERE",
+  "notion_enabled" : false,
+  "override_code" : "CHANGEME",
+  "play_sound_on_block" : false,
+  "prompts" : {
+    "evaluate_reason" : "",
+    "evaluate_site_relevance" : "",
+    "evaluate_title" : ""
+  },
+  "schedule_refresh_minutes" : 5,
+  "show_notifications" : true,
+  "temporary_allow_minutes" : 15,
+  "url_poll_interval_seconds" : 1
+}

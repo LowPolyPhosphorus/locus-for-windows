@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Download Locus</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@300;400;500&family=Bricolage+Grotesque:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #E8A020;
+    --gold-pale: #FDF3E0;
+    --ink: #1A1510;
+    --ink-muted: #6B5E4A;
+    --ink-faint: #C4B49A;
+    --cream: #FDFAF5;
+    --surface: #F7F2E8;
+    --border: #E8DFC8;
+    --white: #FFFFFF;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Bricolage Grotesque', sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 48px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav-logo {
+    display: flex; align-items: center; gap: 10px;
+    font-family: 'Instrument Serif', serif; font-size: 22px;
+    color: var(--ink); text-decoration: none;
+  }
+  .nav-logo .lock-icon {
+    width: 28px; height: 28px; background: var(--gold); border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+
+  .nav-back {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-family: 'DM Mono', monospace;
+    color: var(--ink-muted); text-decoration: none; transition: color 0.2s;
+  }
+  .nav-back:hover { color: var(--ink); }
+
+  main {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 60px 24px;
+  }
+
+  .card {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: 20px; padding: 56px 48px;
+    max-width: 520px; width: 100%; text-align: center;
+    box-shadow: 0 8px 40px rgba(26,21,16,0.06);
+  }
+
+  /* macOS state */
+  .state { display: none; flex-direction: column; align-items: center; gap: 0; }
+  .state.visible { display: flex; }
+
+  .state-icon {
+    font-size: 52px; margin-bottom: 24px; line-height: 1;
+  }
+
+  .state h1 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 36px; font-weight: 400;
+    line-height: 1.1; letter-spacing: -0.02em;
+    color: var(--ink); margin-bottom: 14px;
+  }
+
+  .state p {
+    font-size: 15px; color: var(--ink-muted);
+    line-height: 1.65; font-weight: 300;
+    margin-bottom: 32px; max-width: 380px;
+  }
+
+  .btn-download {
+    background: var(--gold); color: var(--ink); border: none;
+    padding: 15px 36px; border-radius: 10px;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 10px;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 4px 20px rgba(232,160,32,0.35);
+    margin-bottom: 16px;
+  }
+  .btn-download:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(232,160,32,0.45); }
+
+  .version-note {
+    font-family: 'DM Mono', monospace; font-size: 11px;
+    color: var(--ink-faint); letter-spacing: 0.04em;
+  }
+
+  /* Requirements pill */
+  .req-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 16px; margin-top: 24px;
+    font-size: 13px; color: var(--ink-muted);
+  }
+  .req-pill span { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--ink-faint); }
+
+  /* Not macOS state */
+  .not-mac-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 24px; margin-top: 28px;
+    font-size: 13px; color: var(--ink-muted); line-height: 1.6; text-align: left;
+  }
+  .not-mac-box strong { color: var(--ink); font-weight: 600; display: block; margin-bottom: 4px; }
+
+  .btn-secondary {
+    background: transparent; color: var(--ink); border: 1.5px solid var(--border);
+    padding: 12px 28px; border-radius: 10px;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-size: 14px; font-weight: 500; cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: border-color 0.2s, background 0.2s; margin-top: 20px;
+  }
+  .btn-secondary:hover { border-color: var(--ink-faint); background: var(--surface); }
+
+  footer {
+    padding: 24px 48px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .footer-copy { font-size: 12px; color: var(--ink-faint); font-family: 'DM Mono', monospace; }
+
+  @media (max-width: 600px) {
+    nav { padding: 14px 20px; }
+    .card { padding: 40px 28px; }
+    footer { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="locus.html" class="nav-logo">
+    <div class="lock-icon">🔒</div>
+    Locus
+  </a>
+  <a href="locus.html" class="nav-back">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    Back
+  </a>
+</nav>
+
+<main>
+  <div class="card">
+
+    <!-- macOS state -->
+    <div class="state" id="state-mac">
+      <h1>Download Locus</h1>
+      <p>macOS 13 Ventura or later required. Works with Apple Silicon and Intel.</p>
+      <a href="https://github.com/karman-chhatwal/locus/releases/latest/download/Locus.dmg" class="btn-download">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download .dmg
+      </a>
+      <div class="version-note" id="version-label">v1.0.0 · macOS 13+</div>
+      <div class="req-pill">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Requires Accessibility &amp; Screen Recording permissions
+        <span>—&nbsp;prompted on first launch</span>
+      </div>
+    </div>
+
+    <!-- Not macOS state -->
+    <div class="state" id="state-other">
+      <div class="state-icon">💻</div>
+      <h1>macOS only,<br>for now.</h1>
+      <p>Locus is a native macOS app. It looks like you're on a different platform — you'll need a Mac to install it.</p>
+      <div class="not-mac-box">
+        <strong>Still want to try it?</strong>
+        The interactive demo on the main page works in any browser and shows exactly how Locus works.
+      </div>
+      <a href="locus.html#features" class="btn-secondary">
+        ← Back to the site
+      </a>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <span class="footer-copy">locus · built by Karman Chhatwal · 2026</span>
+</footer>
+
+<script>
+  const isMac = /Mac/.test(navigator.platform) ||
+    (navigator.userAgentData && navigator.userAgentData.platform === 'macOS');
+
+  if (isMac) {
+    document.getElementById('state-mac').classList.add('visible');
+  } else {
+    document.getElementById('state-other').classList.add('visible');
+  }
+</script>
+</body>
+</html>
