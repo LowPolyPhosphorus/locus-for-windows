@@ -59,8 +59,11 @@ final class PromptCenter: NSObject, ObservableObject {
         panel.center()
 
         self.panel = panel
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        // Intentionally do NOT call NSApp.activate(ignoringOtherApps:) — that
+        // would bring every Locus window to the foreground. We only want this
+        // floating panel to surface; the main app should stay where it is.
+        panel.orderFrontRegardless()
+        panel.makeKey()
     }
 
     /// Called by PromptView when the user picks an action.

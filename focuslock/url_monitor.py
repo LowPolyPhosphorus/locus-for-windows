@@ -344,6 +344,44 @@ end tell
 """
         subprocess.run(["osascript", "-e", script], capture_output=True)
 
+    def pin_tab_to_blank(self, tab_id: int):
+        """Returns a (stop) callable. Spawns a background thread that keeps
+        the given tab on about:blank — if the user presses back/forward to
+        navigate to a non-blank URL, snap it back. Used to prevent the user
+        from escaping a blocked-site dialog via Chrome's back button."""
+        import threading
+        stop = threading.Event()
+
+        def watcher():
+            check = f"""
+tell application "Google Chrome"
+    set targetId to "{tab_id}"
+    repeat with w in windows
+        repeat with t in tabs of w
+            if (id of t) as text = targetId then
+                return URL of t
+            end if
+        end repeat
+    end repeat
+    return ""
+end tell
+"""
+            while not stop.wait(0.4):
+                try:
+                    out = subprocess.run(
+                        ["osascript", "-e", check],
+                        capture_output=True, text=True, timeout=3,
+                    )
+                    url = (out.stdout or "").strip()
+                    if url and url != "about:blank":
+                        self.redirect_tab_by_id(tab_id)
+                except Exception:
+                    pass
+
+        t = threading.Thread(target=watcher, daemon=True)
+        t.start()
+        return stop.set
+
     def navigate_tab_by_id(self, tab_id: int, url: str):
         """Navigate a specific Chrome tab to a URL."""
         escaped = url.replace("\\", "\\\\").replace('"', '\\"')

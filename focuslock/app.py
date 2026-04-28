@@ -422,13 +422,22 @@ class FocusLockApp:
                 except Exception:
                     pass
                 return
-            # Active — blank the specific tab (not whatever is active right now)
+            # Active — blank the tab to about:blank and leave it there for
+            # the duration of the dialog. If approved we navigate it back to
+            # the original URL; if denied it stays on about:blank.
             self.url_monitor.redirect_tab_by_id(tab_id)
         else:
             # Fallback: no tab_id captured — fall back to old behavior
             self.url_monitor.redirect_chrome()
 
-        action, reason = dialogs.ask_reason(domain, "website", session_name)
+        # Pin the tab to about:blank while the dialog is up — this defeats
+        # Chrome's back button: any navigation away (back/forward/reload)
+        # gets snapped back to about:blank until the user answers.
+        stop_pin = self.url_monitor.pin_tab_to_blank(tab_id) if tab_id else (lambda: None)
+        try:
+            action, reason = dialogs.ask_reason(domain, "website", session_name)
+        finally:
+            stop_pin()
 
         if action == "cancel":
             try:
@@ -436,8 +445,6 @@ class FocusLockApp:
                           session_name=session_name)
             except Exception:
                 pass
-            if tab_id:
-                self.url_monitor.close_tab_by_id(tab_id)
             return
 
         if action == "override":
@@ -462,8 +469,6 @@ class FocusLockApp:
                               session_name=session_name)
                 except Exception:
                     pass
-                if tab_id:
-                    self.url_monitor.close_tab_by_id(tab_id)
             return
 
         if not reason.strip():
@@ -473,8 +478,6 @@ class FocusLockApp:
                           session_name=session_name)
             except Exception:
                 pass
-            if tab_id:
-                self.url_monitor.close_tab_by_id(tab_id)
             return
 
         dialogs.show_notification("Locus", "Evaluating your reason…")
@@ -498,8 +501,6 @@ class FocusLockApp:
             except Exception:
                 pass
         else:
-            if tab_id:
-                self.url_monitor.close_tab_by_id(tab_id)
             try:
                 log_event("url_denied", domain=domain, reason="ai_denied",
                           session_name=session_name)
