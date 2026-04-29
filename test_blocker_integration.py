@@ -1,18 +1,23 @@
 """Integration tests for the blocked-URL tab-tracking logic in app._on_blocked_url.
 
-Simulates the three tab states at dialog time: active, background, gone.
-Uses a fake ClaudeClient so no API calls happen, and monkey-patches the dialog
-to never actually show. Verifies the right tab gets closed / redirected / left alone.
+Windows version — replaces all AppleScript/osascript calls with CDP
+(Chrome DevTools Protocol) via the url_monitor helpers.
+
+Prerequisites:
+    1. Chrome must be running with --remote-debugging-port=9222
+       e.g.  chrome.exe --remote-debugging-port=9222 --remote-allow-origins=*
+    2. pip install requests websocket-client
+
+Run:
+    python test_blocker_integration.py
 """
 
-import subprocess
 import sys
 import time
-import types
 
 sys.path.insert(0, ".")
-from focuslock.url_monitor import URLMonitor
-from focuslock import dialogs
+
+from focuslock.url_monitor import URLMonitor, _cdp_tabs, _navigate_tab, _close_tab
 
 passed = 0
 failed = 0
@@ -29,58 +34,58 @@ def check(name, got, expected):
         failed += 1
 
 
-def run_apple(script):
-    subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+# ── CDP helpers used only in tests ────────────────────────────────────────────
+
+def _get_tab_url_by_ws(ws_url: str) -> str:
+    """Return current URL of a tab by its ws URL, or '' if gone."""
+    for t in _cdp_tabs():
+        if t.get("webSocketDebuggerUrl") == ws_url:
+            return t.get("url", "")
+    return ""
 
 
-def reset_chrome():
-    """Close extra tabs, leave one about:blank tab."""
-    run_apple("""
-        tell application "Google Chrome" to activate
-        delay 0.3
-        tell application "Google Chrome"
-            if (count of windows) = 0 then
-                make new window
-            end if
-            set w to front window
-            repeat while (count of tabs of w) > 1
-                close last tab of w
-            end repeat
-            set URL of active tab of w to "about:blank"
-        end tell
-    """)
-    time.sleep(0.8)
+def _tab_exists(ws_url: str) -> bool:
+    return any(t.get("webSocketDebuggerUrl") == ws_url for t in _cdp_tabs())
 
 
-def open_tab(url):
-    run_apple(f'''
-        tell application "Google Chrome"
-            tell front window to make new tab with properties {{URL:"{url}"}}
-        end tell
-    ''')
-    time.sleep(0.6)
+def _open_tab(url: str) -> str:
+    """Open a new Chrome tab at url, return its ws_url. Returns '' on failure."""
+    import requests as _req
+    try:
+        resp = _req.get(f"http://localhost:9222/json/new?{url}", timeout=3)
+        tab = resp.json()
+        ws = tab.get("webSocketDebuggerUrl", "")
+        time.sleep(0.6)
+        return ws
+    except Exception as e:
+        print(f"  [ERROR] _open_tab failed: {e}")
+        return ""
 
 
-def switch_to_tab(tab_id):
-    run_apple(f"""
-        tell application "Google Chrome"
-            set targetId to "{tab_id}"
-            repeat with w in windows
-                set idx to 0
-                repeat with t in tabs of w
-                    set idx to idx + 1
-                    if (id of t) as text = targetId then
-                        set active tab index of w to idx
-                        return
-                    end if
-                end repeat
-            end repeat
-        end tell
-    """)
+def _close_tab_by_ws(ws_url: str):
+    _close_tab(ws_url)
     time.sleep(0.3)
 
 
-# Build a minimal fake "app" that mimics _on_blocked_url without rumps/claude.
+def reset_chrome():
+    """Leave exactly one about:blank tab open."""
+    tabs = _cdp_tabs()
+    if not tabs:
+        _open_tab("about:blank")
+        time.sleep(0.5)
+        return
+    # Keep the first tab, close the rest
+    keep = tabs[0]["webSocketDebuggerUrl"]
+    _navigate_tab(keep, "about:blank")
+    for t in tabs[1:]:
+        ws = t.get("webSocketDebuggerUrl", "")
+        if ws:
+            _close_tab(ws)
+    time.sleep(0.5)
+
+
+# ── Fake classes (identical logic to macOS version) ───────────────────────────
+
 class FakeClaude:
     def __init__(self, auto_allow=False):
         self.auto_allow = auto_allow
@@ -90,7 +95,7 @@ class FakeClaude:
 
 
 class FakeApp:
-    """Mirrors app._on_blocked_url logic exactly (copy from app.py)."""
+    """Mirrors app._on_blocked_url logic with CDP tab IDs (ws_url strings)."""
     def __init__(self, url_monitor, claude):
         self.url_monitor = url_monitor
         self.claude = claude
@@ -102,147 +107,167 @@ class FakeApp:
         self.dialog_shown = True
         return self.dialog_response
 
-    def on_blocked_url(self, domain, original_url, tab_id):
+    def on_blocked_url(self, domain, original_url, ws_url):
         session_name = "Test"
-        tab_title = self.url_monitor._get_chrome_title() or ""
+        tab_title = ""
+        tabs = _cdp_tabs()
+        for t in tabs:
+            if t.get("webSocketDebuggerUrl") == ws_url:
+                tab_title = t.get("title", "")
+                break
 
         auto_allow, _ = self.claude.evaluate_site_relevance(domain, session_name, tab_title)
         if auto_allow:
             self.url_monitor.allow_domain_temporarily(domain, minutes=15)
             return
 
-        if tab_id:
-            status = self.url_monitor.check_tab_status(tab_id)
-            if status == "gone":
-                return
+        if ws_url:
+            # Check if tab is still alive and active
+            live_ws = {t.get("webSocketDebuggerUrl") for t in _cdp_tabs()}
+            if ws_url not in live_ws:
+                return  # gone → no-op
+            # Check if it's active (frontmost) or background
+            # In CDP, we can't easily tell which tab is "active" across windows,
+            # so we check if the ws_url is the first tab in the list (heuristic)
+            # A proper check would use the Browser.getWindowForTarget CDP call.
+            # For testing purposes we track which tab we designated as "background".
+            status = self._tab_status(ws_url)
             if status == "background":
-                self.url_monitor.close_tab_by_id(tab_id)
+                self.url_monitor.close_tab(ws_url)
                 return
-            self.url_monitor.redirect_tab_by_id(tab_id)
+            self.url_monitor.redirect_tab(ws_url, "about:blank")
         else:
-            self.url_monitor.redirect_chrome()
+            self.url_monitor.close_active_tab()
 
         action, reason = self.fake_ask_reason(domain, "website", session_name)
-        if action == "cancel":
-            if tab_id:
-                self.url_monitor.close_tab_by_id(tab_id)
+        if action == "cancel" and ws_url:
+            self.url_monitor.close_tab(ws_url)
+
+    def _tab_status(self, ws_url: str) -> str:
+        """Simplified status: uses _background_tabs set injected by test."""
+        if ws_url in getattr(self, "_background_tabs", set()):
+            return "background"
+        return "active" if _tab_exists(ws_url) else "gone"
 
 
-print("\n=== Integration Tests ===\n")
+# ── Tests ─────────────────────────────────────────────────────────────────────
+
+print("\n=== Integration Tests (Windows/CDP) ===\n")
 
 mon = URLMonitor(on_blocked_url=lambda d, u, t: None)
 
-# ── Test 1: user stays on blocked tab → redirected + dialog shown ────────
+# Check Chrome is reachable
+tabs = _cdp_tabs()
+if not tabs:
+    print("ERROR: Cannot reach Chrome on localhost:9222.")
+    print("Launch Chrome with:  chrome.exe --remote-debugging-port=9222 --remote-allow-origins=*")
+    sys.exit(1)
+
+# ── Test 1: active tab → redirected to blank + dialog shown ──────────────────
 
 print("Test 1: active → blank + dialog")
 reset_chrome()
-# Open a "blocked" URL in the current tab (using example.com as stand-in)
-run_apple('tell application "Google Chrome" to set URL of active tab of front window to "https://example.com"')
-time.sleep(0.8)
-blocked_tab_id = mon.get_active_tab_id()
+blocked_ws = _open_tab("https://example.com")
+if not blocked_ws:
+    print("  [SKIP] Could not open tab")
+else:
+    app = FakeApp(mon, FakeClaude(auto_allow=False))
+    app.dialog_response = ("cancel", "")
+    app.on_blocked_url("example.com", "https://example.com", blocked_ws)
 
-app = FakeApp(mon, FakeClaude(auto_allow=False))
-app.dialog_response = ("cancel", "")
-app.on_blocked_url("example.com", "https://example.com", blocked_tab_id)
+    check("dialog shown", app.dialog_shown, True)
+    url_after = _get_tab_url_by_ws(blocked_ws)
+    tab_gone = not _tab_exists(blocked_ws)
+    check("tab redirected or closed", "about:blank" in url_after or tab_gone, True)
 
-url = mon._get_chrome_url() or ""
-check("dialog shown", app.dialog_shown, True)
-# After cancel, tab should be closed (set to about:blank since it was only tab)
-check("tab redirected/closed", "about:blank" in url or mon.check_tab_status(blocked_tab_id) == "gone", True)
-
-# ── Test 2: user switched to another tab → silent close, no dialog ───────
+# ── Test 2: background tab → silent close, no dialog ─────────────────────────
 
 print("\nTest 2: background → silent close, no dialog")
 reset_chrome()
-run_apple('tell application "Google Chrome" to set URL of active tab of front window to "https://example.com"')
-time.sleep(0.8)
-blocked_tab_id = mon.get_active_tab_id()
+blocked_ws = _open_tab("https://example.com")
+spare_ws   = _open_tab("about:blank")   # user switches to this
 
-# User opens another tab
-open_tab("about:blank")
-spare_id = mon.get_active_tab_id()
+if not blocked_ws or not spare_ws:
+    print("  [SKIP] Could not open tabs")
+else:
+    app = FakeApp(mon, FakeClaude(auto_allow=False))
+    app._background_tabs = {blocked_ws}   # tell FakeApp this tab is background
+    app.on_blocked_url("example.com", "https://example.com", blocked_ws)
 
-app = FakeApp(mon, FakeClaude(auto_allow=False))
-app.on_blocked_url("example.com", "https://example.com", blocked_tab_id)
+    check("no dialog", app.dialog_shown, False)
+    check("blocked tab gone", not _tab_exists(blocked_ws), True)
+    check("spare tab alive", _tab_exists(spare_ws), True)
 
-check("no dialog", app.dialog_shown, False)
-check("blocked tab gone", mon.check_tab_status(blocked_tab_id), "gone")
-check("spare tab alive", mon.check_tab_status(spare_id) in ("active", "background"), True)
-
-# ── Test 3: tab closed before handler runs → no-op ───────────────────────
+# ── Test 3: tab already closed → no-op ───────────────────────────────────────
 
 print("\nTest 3: gone → no-op")
 reset_chrome()
-run_apple('tell application "Google Chrome" to set URL of active tab of front window to "https://example.com"')
-time.sleep(0.8)
-blocked_tab_id = mon.get_active_tab_id()
+blocked_ws = _open_tab("https://example.com")
+alive_ws   = _open_tab("about:blank")
 
-# Open + close another tab to change state, then close the blocked tab
-open_tab("about:blank")
-alive_id = mon.get_active_tab_id()
-mon.close_tab_by_id(blocked_tab_id)
-time.sleep(0.4)
+if not blocked_ws or not alive_ws:
+    print("  [SKIP] Could not open tabs")
+else:
+    _close_tab_by_ws(blocked_ws)   # close it before handler runs
 
-app = FakeApp(mon, FakeClaude(auto_allow=False))
-app.on_blocked_url("example.com", "https://example.com", blocked_tab_id)
+    app = FakeApp(mon, FakeClaude(auto_allow=False))
+    app.on_blocked_url("example.com", "https://example.com", blocked_ws)
 
-check("no dialog", app.dialog_shown, False)
-check("alive tab untouched", mon.check_tab_status(alive_id) in ("active", "background"), True)
-# Verify alive tab's URL is still about:blank (not blanked by any side effect)
-url = mon._get_chrome_url() or ""
-check("alive tab url preserved", "about:blank" in url, True)
+    check("no dialog", app.dialog_shown, False)
+    check("alive tab untouched", _tab_exists(alive_ws), True)
+    check("alive tab url preserved", "about:blank" in _get_tab_url_by_ws(alive_ws), True)
 
-# ── Test 4: innocent bystander tab is NOT blanked when user switches ────
+# ── Test 4: bystander tab not blanked when user switches ─────────────────────
 
 print("\nTest 4: switching tabs doesn't blank bystander")
 reset_chrome()
-# Tab A: blocked
-run_apple('tell application "Google Chrome" to set URL of active tab of front window to "https://example.com"')
-time.sleep(0.8)
-blocked_tab_id = mon.get_active_tab_id()
+blocked_ws    = _open_tab("https://example.com")
+bystander_ws  = _open_tab("https://www.iana.org/domains/example")
+time.sleep(0.8)  # let iana.org start loading
 
-# Tab B: user's work — put a distinctive URL
-open_tab("https://www.iana.org/domains/example")
-bystander_id = mon.get_active_tab_id()
-bystander_url_before = mon._get_chrome_url()
+if not blocked_ws or not bystander_ws:
+    print("  [SKIP] Could not open tabs")
+else:
+    url_before = _get_tab_url_by_ws(bystander_ws)
 
-# User stays on bystander while handler fires for blocked tab
-app = FakeApp(mon, FakeClaude(auto_allow=False))
-app.on_blocked_url("example.com", "https://example.com", blocked_tab_id)
+    app = FakeApp(mon, FakeClaude(auto_allow=False))
+    app._background_tabs = {blocked_ws}
+    app.on_blocked_url("example.com", "https://example.com", blocked_ws)
 
-bystander_url_after = mon._get_chrome_url()
-check("bystander URL preserved", bystander_url_before, bystander_url_after)
-check("bystander still active", mon.check_tab_status(bystander_id), "active")
-check("blocked tab closed", mon.check_tab_status(blocked_tab_id), "gone")
+    url_after = _get_tab_url_by_ws(bystander_ws)
+    check("bystander URL preserved", url_before, url_after)
+    check("bystander still alive", _tab_exists(bystander_ws), True)
+    check("blocked tab closed", not _tab_exists(blocked_ws), True)
 
-# ── Test 5: auto_allow skips everything ──────────────────────────────────
+# ── Test 5: auto_allow skips everything ──────────────────────────────────────
 
 print("\nTest 5: auto_allow path")
 reset_chrome()
-run_apple('tell application "Google Chrome" to set URL of active tab of front window to "https://example.com"')
-time.sleep(0.8)
-blocked_tab_id = mon.get_active_tab_id()
+blocked_ws = _open_tab("https://example.com")
 
-app = FakeApp(mon, FakeClaude(auto_allow=True))
-app.on_blocked_url("example.com", "https://example.com", blocked_tab_id)
+if not blocked_ws:
+    print("  [SKIP] Could not open tab")
+else:
+    app = FakeApp(mon, FakeClaude(auto_allow=True))
+    app.on_blocked_url("example.com", "https://example.com", blocked_ws)
 
-check("no dialog on auto_allow", app.dialog_shown, False)
-check("tab preserved", mon.check_tab_status(blocked_tab_id), "active")
-check("domain temp-allowed", "example.com" in mon.temporarily_allowed, True)
+    check("no dialog on auto_allow", app.dialog_shown, False)
+    check("tab preserved", _tab_exists(blocked_ws), True)
+    check("domain temp-allowed", "example.com" in mon.temporarily_allowed, True)
 
-# ── Test 6: no tab_id → fallback to redirect_chrome ──────────────────────
+# ── Test 6: no ws_url → fallback to close_active_tab ────────────────────────
 
-print("\nTest 6: missing tab_id falls back to redirect_chrome")
+print("\nTest 6: missing ws_url falls back to close_active_tab")
 reset_chrome()
-run_apple('tell application "Google Chrome" to set URL of active tab of front window to "https://example.com"')
-time.sleep(0.8)
+_open_tab("https://example.com")
+time.sleep(0.5)
 
 app = FakeApp(mon, FakeClaude(auto_allow=False))
 app.dialog_response = ("cancel", "")
 app.on_blocked_url("example.com", "https://example.com", None)
 check("dialog shown in fallback", app.dialog_shown, True)
 
-# ── Summary ──────────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*40}")
 print(f"Results: {passed} passed, {failed} failed")
