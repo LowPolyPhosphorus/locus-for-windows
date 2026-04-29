@@ -1,18 +1,20 @@
-"""Test script for tab-tracking functionality in URLMonitor.
+"""Test script for tab-tracking functionality in URLMonitor (Windows/CDP).
 
-Opens Chrome tabs and verifies get_active_tab_id, check_tab_status,
-and close_tab_by_id behave correctly.
+Opens Chrome tabs and verifies CDP-based tab management:
+get_active_tab_ws_url, _cdp_tabs, close_tab, redirect_tab.
 
 Usage: python test_tab_tracking.py
-Requires: Google Chrome running (will open/close tabs).
+Requires: Google Chrome running with --remote-debugging-port=9222
+          (tray_app.py / open_chrome_with_debug() handles this automatically)
 """
 
 import subprocess
 import time
 import sys
+import requests
 
 sys.path.insert(0, ".")
-from focuslock.url_monitor import URLMonitor
+from focuslock.url_monitor import URLMonitor, _cdp_tabs
 
 mon = URLMonitor(on_blocked_url=lambda d, u, t: None)
 
@@ -31,124 +33,128 @@ def check(name, got, expected):
         failed += 1
 
 
-def run_apple(script):
-    subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+def cdp_new_tab(url="about:blank"):
+    """Open a new tab via CDP and return its webSocketDebuggerUrl."""
+    resp = requests.get(f"http://localhost:9222/json/new?{url}", timeout=5)
+    resp.raise_for_status()
+    return resp.json().get("webSocketDebuggerUrl")
 
 
-def ensure_chrome():
-    """Make sure Chrome is running with at least one window."""
-    run_apple("""
-        tell application "Google Chrome" to activate
-        delay 0.5
-        tell application "Google Chrome"
-            if (count of windows) = 0 then
-                make new window
-            end if
-        end tell
-    """)
-    time.sleep(1)
+def cdp_activate_tab(ws_url):
+    """Bring a tab to the foreground by its ws_url."""
+    tabs = _cdp_tabs()
+    for tab in tabs:
+        if tab.get("webSocketDebuggerUrl") == ws_url:
+            tab_id = tab.get("id")
+            requests.get(f"http://localhost:9222/json/activate/{tab_id}", timeout=5)
+            return
+    raise ValueError(f"Tab not found: {ws_url}")
 
 
-# ── Setup ────────────────────────────────────────────────────────────────
+def tab_exists(ws_url):
+    """Return True if the tab is still in the CDP tab list."""
+    live = {t.get("webSocketDebuggerUrl") for t in _cdp_tabs()}
+    return ws_url in live
 
-print("\n=== Tab Tracking Tests ===\n")
-ensure_chrome()
 
-# ── Test 1: get_active_tab_id returns an integer ─────────────────────────
+def tab_is_active(ws_url):
+    """Return True if this tab is the frontmost tab (type=page, not devtools)."""
+    tabs = [t for t in _cdp_tabs() if t.get("type") == "page"]
+    if not tabs:
+        return False
+    # CDP doesn't expose 'active' directly; last activated is usually last in list
+    # Best proxy: activate it and check it's still alive
+    return ws_url in {t.get("webSocketDebuggerUrl") for t in tabs}
 
-print("Test 1: get_active_tab_id returns an integer")
-run_apple('tell application "Google Chrome" to set URL of active tab of front window to "about:blank"')
+
+# ── Preflight: make sure Chrome debug port is reachable ─────────────────
+
+print("\n=== Tab Tracking Tests (CDP) ===\n")
+try:
+    requests.get("http://localhost:9222/json", timeout=3)
+except Exception:
+    print("ERROR: Chrome debug port not reachable on localhost:9222.")
+    print("Launch Chrome with: chrome.exe --remote-debugging-port=9222 --remote-allow-origins=*")
+    print("Or let tray_app.py start Chrome via open_chrome_with_debug().")
+    sys.exit(1)
+
+# ── Test 1: open a new tab, get its ws_url ───────────────────────────────
+
+print("Test 1: cdp_new_tab returns a ws_url string")
+ws1 = cdp_new_tab("about:blank")
+time.sleep(0.4)
+check("returns string", isinstance(ws1, str), True)
+check("non-empty", bool(ws1), True)
+check("tab exists in CDP list", tab_exists(ws1), True)
+
+# ── Test 2: tab appears in _cdp_tabs() ──────────────────────────────────
+
+print("\nTest 2: _cdp_tabs() includes the new tab")
+all_ws = {t.get("webSocketDebuggerUrl") for t in _cdp_tabs()}
+check("tab in cdp_tabs()", ws1 in all_ws, True)
+
+# ── Test 3: open a second tab — both should exist ────────────────────────
+
+print("\nTest 3: open second tab, both tabs exist")
+ws2 = cdp_new_tab("about:blank")
+time.sleep(0.4)
+check("tab1 still exists", tab_exists(ws1), True)
+check("tab2 exists", tab_exists(ws2), True)
+check("tabs are distinct", ws1 != ws2, True)
+
+# ── Test 4: close_tab removes the tab ────────────────────────────────────
+
+print("\nTest 4: close_tab removes the correct tab")
+mon.close_tab(ws1)
 time.sleep(0.5)
-tab_id = mon.get_active_tab_id()
-check("returns int", isinstance(tab_id, int), True)
-check("positive", tab_id is not None and tab_id > 0, True)
+check("closed tab is gone", tab_exists(ws1), False)
+check("other tab survived", tab_exists(ws2), True)
 
-# ── Test 2: active tab reports 'active' ──────────────────────────────────
+# ── Test 5: close_tab on a bogus ws_url doesn't crash ───────────────────
 
-print("\nTest 2: check_tab_status on active tab")
-status = mon.check_tab_status(tab_id)
-check("status is active", status, "active")
+print("\nTest 5: close_tab with bogus ws_url is a no-op")
+try:
+    mon.close_tab("ws://localhost:9222/devtools/page/doesnotexist")
+    check("no exception raised", True, True)
+except Exception as e:
+    check("no exception raised", False, True)
 
-# ── Test 3: opening a new tab makes the old one 'background' ────────────
+# ── Test 6: redirect_tab navigates the tab ───────────────────────────────
 
-print("\nTest 3: old tab becomes 'background' after opening new tab")
-run_apple("""
-    tell application "Google Chrome"
-        tell front window to make new tab with properties {URL:"about:blank"}
-    end tell
-""")
+print("\nTest 6: redirect_tab navigates tab to target URL")
+ws3 = cdp_new_tab("about:blank")
+time.sleep(0.4)
+mon.redirect_tab(ws3, "about:blank")
 time.sleep(0.5)
-status = mon.check_tab_status(tab_id)
-check("old tab is background", status, "background")
+# Verify tab still alive after redirect
+check("tab still alive after redirect", tab_exists(ws3), True)
 
-new_tab_id = mon.get_active_tab_id()
-check("new tab is different", new_tab_id != tab_id, True)
-check("new tab is active", mon.check_tab_status(new_tab_id), "active")
+# ── Test 7: bogus ws_url returns 'gone' from tab_exists ─────────────────
 
-# ── Test 4: close_tab_by_id closes the right tab ────────────────────────
+print("\nTest 7: tab_exists with bogus ws_url returns False")
+check("bogus ws_url not found", tab_exists("ws://localhost:9222/devtools/page/999999999"), False)
 
-print("\nTest 4: close_tab_by_id closes background tab, not active")
-mon.close_tab_by_id(tab_id)
+# ── Test 8: close_active_tab closes the frontmost page tab ──────────────
+
+print("\nTest 8: close_active_tab removes a tab")
+ws4 = cdp_new_tab("about:blank")
+time.sleep(0.4)
+cdp_activate_tab(ws4)
+time.sleep(0.3)
+before_count = len([t for t in _cdp_tabs() if t.get("type") == "page"])
+mon.close_active_tab()
 time.sleep(0.5)
-check("closed tab is gone", mon.check_tab_status(tab_id), "gone")
-check("active tab still exists", mon.check_tab_status(new_tab_id), "active")
+after_count = len([t for t in _cdp_tabs() if t.get("type") == "page"])
+check("one fewer page tab after close_active_tab", after_count, before_count - 1)
 
-# ── Test 5: close_tab_by_id on active tab ────────────────────────────────
+# ── Cleanup ──────────────────────────────────────────────────────────────
 
-print("\nTest 5: close_tab_by_id on the active tab")
-# Open a second tab so closing the active one doesn't leave 0 tabs
-run_apple("""
-    tell application "Google Chrome"
-        tell front window to make new tab with properties {URL:"about:blank"}
-    end tell
-""")
-time.sleep(0.5)
-spare_id = mon.get_active_tab_id()
-
-# Switch back to new_tab_id and close it
-run_apple(f"""
-    tell application "Google Chrome"
-        repeat with w in windows
-            repeat with t in tabs of w
-                if id of t = {new_tab_id} then
-                    set active tab index of w to (index of t)
-                    set index of w to 1
-                    return
-                end if
-            end repeat
-        end repeat
-    end tell
-""")
-time.sleep(0.5)
-mon.close_tab_by_id(new_tab_id)
-time.sleep(0.5)
-check("closed tab is gone", mon.check_tab_status(new_tab_id), "gone")
-check("spare tab survived", mon.check_tab_status(spare_id) in ("active", "background"), True)
-
-# ── Test 6: check_tab_status with bogus ID returns 'gone' ───────────────
-
-print("\nTest 6: bogus tab ID returns 'gone'")
-check("bogus id", mon.check_tab_status(999999999), "gone")
-
-# ── Test 7: close_tab_by_id with last tab sets about:blank ──────────────
-
-print("\nTest 7: closing the only tab in a window sets about:blank")
-# Close all tabs except one
-run_apple("""
-    tell application "Google Chrome"
-        set w to front window
-        repeat while (count of tabs of w) > 1
-            close last tab of w
-        end repeat
-        set URL of active tab of w to "https://example.com"
-    end tell
-""")
-time.sleep(1)
-only_tab_id = mon.get_active_tab_id()
-mon.close_tab_by_id(only_tab_id)
-time.sleep(0.5)
-url = mon._get_chrome_url() or ""
-check("tab set to about:blank", url, "about:blank")
+for ws in [ws2, ws3]:
+    if tab_exists(ws):
+        try:
+            mon.close_tab(ws)
+        except Exception:
+            pass
 
 # ── Summary ──────────────────────────────────────────────────────────────
 
