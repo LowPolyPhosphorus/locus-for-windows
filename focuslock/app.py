@@ -1,4 +1,15 @@
-"""Locus — headless focus daemon. Launched by the Swift UI app."""
+"""Locus — headless focus daemon. (Windows)
+
+Launched by the PyQt6 tray UI (replaces the Swift app).
+
+Changes from macOS version:
+- tab_id: Optional[int]  →  ws_url: Optional[str]  (CDP WebSocket URL)
+- check_tab_status / close_tab_by_id / navigate_tab_by_id / redirect_tab_by_id
+  replaced with URLMonitor's new CDP-based equivalents
+- SIGTERM handling made Windows-safe (signal.SIGTERM not reliably catchable
+  on Windows; we use a threading.Event stopped by CTRL_C_EVENT / SIGINT)
+- dialogs.show_notification wired to Windows toast (handled in dialogs.py)
+"""
 
 import json
 import os
@@ -76,7 +87,6 @@ class FocusLockApp:
         if self._notion_enabled():
             key = self.config.get("api_keys", {}).get("notion", "")
             if not key or key == "YOUR_NOTION_API_KEY":
-                # Swift UI surfaces config problems visually; just log.
                 print("[Locus] Notion is enabled but no API key is set.")
 
     def _init_ical(self):
@@ -102,7 +112,6 @@ class FocusLockApp:
         val = self.config.get("notion_enabled")
         if val is not None:
             return bool(val)
-        # Legacy: if no flag, enable when a real key is present
         key = self.config.get("api_keys", {}).get("notion", "")
         return bool(key) and key != "YOUR_NOTION_API_KEY"
 
@@ -132,14 +141,13 @@ class FocusLockApp:
                 events.extend(self.ical.get_upcoming_events())
             except Exception as e:
                 print(f"[Locus] iCal fetch error: {e}")
-        # Sort: by date, then by start_time (date-only events sort first).
         events.sort(key=lambda e: (e.date, e.start_time or ""))
         self.all_events = events
         print(f"[Locus] Loaded {len(self.all_events)} upcoming events")
         self._write_state()
 
     def _write_state(self):
-        """Write events + session info for the Swift app to read."""
+        """Write events + session info for the tray UI to read."""
         state = {
             "events": [asdict(e) for e in self.all_events],
             "session": {
@@ -169,7 +177,7 @@ class FocusLockApp:
             pass
 
     def _command_loop(self):
-        """Watch for commands from the Swift app."""
+        """Watch for commands written by the tray UI."""
         while True:
             if os.path.exists(COMMAND_PATH):
                 try:
@@ -188,9 +196,6 @@ class FocusLockApp:
         cmd_type = cmd.get("type", "")
         data = cmd.get("data", {})
         if cmd_type == "start_session":
-            # Prefer the stable (title, date) handle — index can shift if a
-            # Notion refresh re-orders events between Swift sending the cmd
-            # and us processing it. Fall back to index for older clients.
             handle_title = (data.get("title") or "").strip()
             handle_date = (data.get("date") or "").strip()
             event = None
@@ -219,8 +224,6 @@ class FocusLockApp:
             self._init_ical()
             self._refresh_schedule()
         elif cmd_type == "reconnect_notion":
-            # Swift just changed the Notion key/db; rebuild the client so the
-            # next refresh uses the new credentials instead of cached ones.
             self.config = load_config()
             try:
                 if self._notion_enabled():
@@ -236,7 +239,6 @@ class FocusLockApp:
             self._refresh_schedule()
 
     def _custom_session(self, title: str) -> FocusSession:
-        # Reload config so recent changes take effect
         self.config = load_config()
         activities = self.config.get("activities", {})
         mapping = activities.get("DEFAULT", {})
@@ -252,7 +254,6 @@ class FocusLockApp:
     # ── Session control ───────────────────────────────────────────────────
 
     def _event_to_session(self, ev: NotionEvent) -> FocusSession:
-        # Reload config so settings changes take effect without restart
         self.config = load_config()
         activities = self.config.get("activities", {})
         mapping = activities.get(ev.class_name) or activities.get("DEFAULT", {})
@@ -385,11 +386,14 @@ class FocusLockApp:
             except Exception:
                 pass
 
-    def _on_blocked_url(self, domain: str, original_url: str, tab_id: Optional[int], tab_title: str = ""):
+    def _on_blocked_url(
+        self,
+        domain: str,
+        original_url: str,
+        ws_url: Optional[str],   # CDP WebSocket URL — replaces tab_id: int
+        tab_title: str = "",
+    ):
         session_name = self.current_session.display_name if self.current_session else "Focus Session"
-        # `tab_title` is captured by url_monitor at the moment of detection,
-        # so it reflects the actual blocked tab — not whichever window
-        # happens to be frontmost when the AI pre-screen runs.
 
         # Smart pre-screen: check if the site is obviously relevant
         auto_allow, ai_reason = self.claude.evaluate_site_relevance(
@@ -398,8 +402,6 @@ class FocusLockApp:
         if auto_allow:
             mins = self.config.get("temporary_allow_minutes", 15)
             self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
-            # url_monitor no longer pre-redirects on first sighting, so the
-            # tab is still loading the original URL — nothing to restore.
             print(f"[FocusLock] Auto-allowed {domain}: {ai_reason}")
             try:
                 log_event("url_allowed", domain=domain, reason="ai_approved",
@@ -408,32 +410,14 @@ class FocusLockApp:
                 pass
             return
 
-        # Check whether the user is still on the blocked tab before doing anything
-        if tab_id:
-            status = self.url_monitor.check_tab_status(tab_id)
-            if status == "gone":
-                return
-            if status == "background":
-                # User navigated away — silently close the blocked tab, no dialog
-                self.url_monitor.close_tab_by_id(tab_id)
-                try:
-                    log_event("url_denied", domain=domain, reason="background_silent_close",
-                              session_name=session_name)
-                except Exception:
-                    pass
-                return
-            # Active — blank the tab to about:blank and leave it there for
-            # the duration of the dialog. If approved we navigate it back to
-            # the original URL; if denied it stays on about:blank.
-            self.url_monitor.redirect_tab_by_id(tab_id)
+        # Redirect the tab to about:blank while the dialog is shown
+        if ws_url:
+            self.url_monitor.redirect_tab(ws_url, "about:blank")
         else:
-            # Fallback: no tab_id captured — fall back to old behavior
-            self.url_monitor.redirect_chrome()
+            self.url_monitor.close_active_tab()
 
-        # Pin the tab to about:blank while the dialog is up — this defeats
-        # Chrome's back button: any navigation away (back/forward/reload)
-        # gets snapped back to about:blank until the user answers.
-        stop_pin = self.url_monitor.pin_tab_to_blank(tab_id) if tab_id else (lambda: None)
+        # Pin to blank — defeats Chrome back/forward navigation during dialog
+        stop_pin = self.url_monitor.pin_tab_to_blank(ws_url) if ws_url else (lambda: None)
         try:
             action, reason = dialogs.ask_reason(domain, "website", session_name)
         finally:
@@ -452,8 +436,8 @@ class FocusLockApp:
                 mins = self.config.get("temporary_allow_minutes", 15)
                 self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
                 self.url_monitor.set_title_cooldown(domain, seconds=7)
-                if tab_id:
-                    self.url_monitor.navigate_tab_by_id(tab_id, original_url)
+                if ws_url:
+                    self.url_monitor.redirect_tab(ws_url, original_url)
                 else:
                     self.url_monitor.navigate_chrome_to(original_url)
                 dialogs.show_notification("Override accepted", f"{domain} allowed for {mins} min")
@@ -491,8 +475,8 @@ class FocusLockApp:
         if approved:
             self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
             self.url_monitor.set_title_cooldown(domain, seconds=10)
-            if tab_id:
-                self.url_monitor.navigate_tab_by_id(tab_id, original_url)
+            if ws_url:
+                self.url_monitor.redirect_tab(ws_url, original_url)
             else:
                 self.url_monitor.navigate_chrome_to(original_url)
             try:
@@ -507,7 +491,12 @@ class FocusLockApp:
             except Exception:
                 pass
 
-    def _on_off_topic_content(self, domain: str, tab_title: str, tab_id: Optional[int]):
+    def _on_off_topic_content(
+        self,
+        domain: str,
+        tab_title: str,
+        ws_url: Optional[str],   # CDP WebSocket URL — replaces tab_id: int
+    ):
         """Called when a temporarily-allowed site shows potentially off-topic content."""
         session_name = self.current_session.display_name if self.current_session else "Focus Session"
 
@@ -521,28 +510,25 @@ class FocusLockApp:
         except Exception:
             pass
 
-        # Check if user is still on the off-topic tab before taking action
-        if tab_id:
-            status = self.url_monitor.check_tab_status(tab_id)
-            if status == "gone":
+        # Check tab status via CDP tab list
+        if ws_url:
+            from .url_monitor import _cdp_tabs
+            live_ws = {t.get("webSocketDebuggerUrl") for t in _cdp_tabs()}
+            if ws_url not in live_ws:
+                # Tab gone — just revoke the domain
                 self.url_monitor.temporarily_allowed.pop(domain, None)
                 return
-            if status == "background":
-                # User moved on — just revoke + close that specific tab silently
-                self.url_monitor.revoke_domain(domain, tab_id=tab_id)
-                return
 
-        # Off-topic detected and user is still there — revoke and reprompt
-        self.url_monitor.revoke_domain(domain, tab_id=tab_id)
+        # Revoke + close the tab
+        self.url_monitor.revoke_domain(domain, ws_url=ws_url)
 
         action, user_reason = dialogs.ask_off_topic_reason(
             domain, tab_title, session_name, ai_reason,
         )
 
         if action == "cancel" or not user_reason.strip():
-            return  # Already revoked, tab closed
+            return
 
-        # Re-evaluate with the user's explanation
         dialogs.show_notification("Locus", "Evaluating your reason…")
         approved, explanation = self.claude.evaluate_reason(
             subject=f"{domain} — \"{tab_title}\"",
@@ -556,18 +542,16 @@ class FocusLockApp:
         if approved:
             self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
             self.url_monitor.set_title_cooldown(domain, seconds=10)
-            # The old tab was closed/blanked by revoke_domain() above, so open
-            # a fresh tab instead of navigating the user's current tab (which
-            # would be whatever window they switched to during the dialog).
             self.url_monitor.open_url_in_new_tab(f"https://{domain}")
 
+
+# ── Single-instance lock ──────────────────────────────────────────────────────
 
 def _acquire_single_instance_lock():
     """Ensure only one locusd is running.
 
-    If another live process holds the lock, exit. If the lock file is stale
-    (PID gone), take it over. Without this, multiple backends race on
-    state.json and the UI flickers between session/no-session views.
+    On Windows, os.kill(pid, 0) works for the liveness probe but SIGTERM
+    isn't reliably deliverable, so we use psutil for the check when available.
     """
     try:
         os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
@@ -578,15 +562,18 @@ def _acquire_single_instance_lock():
             except Exception:
                 other_pid = 0
             if other_pid and other_pid != os.getpid():
+                alive = False
                 try:
-                    os.kill(other_pid, 0)  # signal 0 = liveness probe
+                    import psutil
+                    alive = psutil.pid_exists(other_pid)
+                except ImportError:
+                    try:
+                        os.kill(other_pid, 0)
+                        alive = True
+                    except (ProcessLookupError, PermissionError):
+                        alive = True  # conservative
+                if alive:
                     print(f"[Locus] Another locusd is already running (pid {other_pid}); exiting.")
-                    raise SystemExit(0)
-                except ProcessLookupError:
-                    pass  # stale lock — fall through and overwrite
-                except PermissionError:
-                    # Process exists but is owned by someone else; treat as live.
-                    print(f"[Locus] locusd pid {other_pid} appears to be running; exiting.")
                     raise SystemExit(0)
         with open(LOCK_PATH, "w") as f:
             f.write(str(os.getpid()))
@@ -609,10 +596,19 @@ def _release_lock():
 def main():
     _acquire_single_instance_lock()
     app = FocusLockApp()  # noqa: F841 — worker threads run on it
-    # Block forever; worker threads do all the work. SIGTERM / SIGINT exit.
     stop = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: stop.set())
+
+    # SIGINT works on Windows; SIGTERM does not always, so we catch both
+    # but don't crash if SIGTERM registration fails.
+    def _handle_sig(*_):
+        stop.set()
+
+    signal.signal(signal.SIGINT, _handle_sig)
+    try:
+        signal.signal(signal.SIGTERM, _handle_sig)
+    except (OSError, ValueError):
+        pass  # SIGTERM not supported on this platform
+
     try:
         stop.wait()
     finally:
