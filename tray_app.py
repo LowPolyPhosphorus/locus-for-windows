@@ -45,10 +45,6 @@ def _make_icon(color: str) -> QIcon:
     return QIcon(px)
 
 
-ICON_IDLE   = _make_icon("#5A5A5A")
-ICON_ACTIVE = _make_icon("#E53935")
-
-
 # ── State reader ──────────────────────────────────────────────────────────────
 
 def _read_state() -> dict:
@@ -348,16 +344,12 @@ class LocusTrayApp(QSystemTrayIcon):
 
 
 # ── dialogs.py shim ───────────────────────────────────────────────────────────
-# The daemon calls functions in focuslock/dialogs.py. On macOS these were
-# AppleScript popups. Below is the Windows PyQt6 replacement — save this
-# as focuslock/dialogs.py (it imports cleanly from either the daemon or UI).
 
 DIALOGS_PY = '''"""dialogs.py — Windows replacement for macOS AppleScript popups."""
 import sys
 import threading
 from typing import Tuple
 
-# Toast notifications via win10toast if available, else silent.
 try:
     from win10toast import ToastNotifier
     _toaster = ToastNotifier()
@@ -381,10 +373,7 @@ def show_notification(title: str, message: str):
 
 
 def _run_qt_dialog(fn):
-    """Run a Qt dialog from a non-Qt thread safely."""
     from PyQt6.QtWidgets import QApplication
-    import importlib, sys
-    # If a QApplication already exists (tray UI is running), use it.
     app = QApplication.instance()
     _created = False
     if app is None:
@@ -409,7 +398,6 @@ def _run_qt_dialog(fn):
 
 
 def ask_reason(subject: str, subject_type: str, session_name: str) -> Tuple[str, str]:
-    """Show the reason prompt. Returns (action, reason)."""
     from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
     from PyQt6.QtCore import Qt
 
@@ -487,8 +475,9 @@ def ask_override_code(correct_code: str) -> bool:
 
 def show_result(approved: bool, explanation: str, subject: str, minutes: int = 15):
     from PyQt6.QtWidgets import QMessageBox
+    import PyQt6.QtCore
     msg = QMessageBox()
-    msg.setWindowFlag(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.WindowType.WindowStaysOnTopHint)
+    msg.setWindowFlag(PyQt6.QtCore.Qt.WindowType.WindowStaysOnTopHint)
     if approved:
         msg.setIcon(QMessageBox.Icon.Information)
         msg.setWindowTitle("Access Granted")
@@ -512,13 +501,33 @@ def ask_off_topic_reason(domain: str, title: str, session_name: str, ai_reason: 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def _ensure_daemon():
+    """Launch locusd if it isn't already running."""
+    import psutil
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            cmdline = " ".join(proc.info.get("cmdline") or [])
+            if "locusd_entry" in cmdline or "locusd" in cmdline:
+                return
+        except Exception:
+            pass
+    subprocess.Popen(
+        [sys.executable, "locusd_entry.py"],
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+
+
 def main():
-    # Ensure the daemon is running (launch it if not)
     _ensure_daemon()
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Locus")
+
+    # Icons must be created AFTER QApplication
+    global ICON_IDLE, ICON_ACTIVE
+    ICON_IDLE   = _make_icon("#5A5A5A")
+    ICON_ACTIVE = _make_icon("#E53935")
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         print("[Locus] System tray not available.")
@@ -528,25 +537,8 @@ def main():
     sys.exit(app.exec())
 
 
-def _ensure_daemon():
-    """Launch locusd if it isn't already running."""
-    import psutil
-    for proc in psutil.process_iter(["name", "cmdline"]):
-        try:
-            cmdline = " ".join(proc.info.get("cmdline") or [])
-            if "locusd_entry" in cmdline or "locusd" in cmdline:
-                return  # already running
-        except Exception:
-            pass
-    # Launch daemon in background
-    subprocess.Popen(
-        [sys.executable, "locusd_entry.py"],
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    )
-
-
 if __name__ == "__main__":
-    # Also write dialogs.py if it doesn't exist yet
+    # Write dialogs.py if missing
     dialogs_path = os.path.join(os.path.dirname(__file__), "focuslock", "dialogs.py")
     if not os.path.exists(dialogs_path):
         os.makedirs(os.path.dirname(dialogs_path), exist_ok=True)
