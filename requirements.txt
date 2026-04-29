@@ -1,7 +1,20 @@
-rumps>=0.4.0
+# Locus Windows dependencies
+# pip install -r requirements.txt
+
+# Core (same as macOS)
 requests>=2.31.0
 openai>=1.40.0
-pyobjc-framework-Cocoa
 schedule>=1.2.0
 icalendar>=5.0.0
 recurring-ical-events>=2.1.0
+
+# Windows replacements
+psutil>=5.9.0          # replaces osascript process listing (was implicit on macOS)
+pywin32>=306           # Win32 API: foreground window, process info
+websocket-client>=1.7  # CDP tab control (replaces AppleScript Chrome commands)
+PyQt6>=6.6.0           # Tray UI (replaces Swift/SwiftUI)
+win10toast>=0.9        # Windows toast notifications (optional, soft dep)
+
+# Removed from macOS version:
+# rumps              — macOS menu bar framework, no Windows equivalent needed (PyQt6 covers it)
+# pyobjc-framework-Cocoa — macOS only
