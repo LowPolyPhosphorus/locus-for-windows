@@ -38,10 +38,12 @@ Session: **{session_name}**
 Blocked {subject_type}: **{subject}**
 Student's reason: "{reason}"
 
-Approve only if the reason is important for the current subject.
-Understand that this student isn't perfect. It isn't your job to make them a better student, rather a more focus student.
-Give the student the benfit of the doubt, only if it is obvious should you block it.
-Be more strict for websites such as YouTube and Netfilx.
+Important context:
+- "Focus session" does NOT always mean homework. It can mean a coding project, hackathon, game dev, creative work, or any personal project.
+- If the session name suggests a dev/tech/creative project (e.g. contains words like "hack", "project", "game", "build", "code", "app", "dev"), be MORE lenient about technical tools — Steam (for testing games), Unity, VS Code, terminals, browsers, etc. are likely legitimate.
+- If the session name suggests academic work (e.g. "math homework", "essay", "study"), be stricter about unrelated apps.
+- Give the student the benefit of the doubt. Only deny if the reason is clearly unrelated or obviously an excuse.
+- Be more strict for entertainment apps with no plausible work use (Netflix, TikTok, etc.).
 
 Respond in exactly this format:
 DECISION: APPROVED or DENIED
