@@ -253,6 +253,14 @@ class AppBlocker:
         else:
             subprocess.run(["taskkill", "/F", "/IM", exe, "/T"], capture_output=True)
 
+    # ── Name remapping — map subprocess names to their parent app ────────
+
+    def _remap_name(self, name: str) -> str:
+        """Map subprocess-only process names to their logical parent app name."""
+        if "steam" in name:
+            return "steam"
+        return name
+
     # ── Main poll loop ────────────────────────────────────────────────────
 
     def _loop(self):
@@ -261,14 +269,13 @@ class AppBlocker:
                 for name, proc in self._get_running_gui_apps():
                     if self._is_allowed(name):
                         continue
-                    if name in self._handling:
-                        # Dialog already queued or showing — kill any respawn silently
-                        self._terminate_app(name, proc)
+                    display_name = self._remap_name(name)
+                    if display_name in self._handling:
+                        self._terminate_app(display_name, proc)
                         continue
-                    # New violation — queue it, don't kill yet
-                    self._handling.add(name)
-                    self._violation_queue.put((name, proc))
-                    print(f"[Locus] Queued violation: {name}")
+                    self._handling.add(display_name)
+                    self._violation_queue.put((display_name, proc))
+                    print(f"[Locus] Queued violation: {display_name}")
             except Exception as e:
                 print(f"[Locus] App blocker error: {e}")
             time.sleep(self.poll_seconds)
