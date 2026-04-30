@@ -37,40 +37,41 @@ def show_notification(title: str, message: str):
 
 # ── Qt helpers ────────────────────────────────────────────────────────────────
 
-def _run_qt_dialog(fn):
-    """Run a Qt dialog safely from any thread.
+# Serialize all dialogs — Qt dialogs must run on the main thread one at a time.
+# Without this, simultaneous violations queue up on the main thread via
+# QTimer.singleShot and only the first one shows; the rest time out silently.
+_dialog_lock = threading.Lock()
 
-    If the tray UI's QApplication already exists we schedule onto it via
-    QTimer and block the calling thread until the dialog closes.
-    If we're running headless (no QApplication yet) we create one,
-    run the dialog, then exit it.
-    """
+
+def _run_qt_dialog(fn):
+    """Run a Qt dialog safely from any thread, one at a time."""
     import sys
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtCore import QTimer
 
-    app = QApplication.instance()
-    _created = False
-    if app is None:
-        app = QApplication(sys.argv)
-        _created = True
+    with _dialog_lock:
+        app = QApplication.instance()
+        _created = False
+        if app is None:
+            app = QApplication(sys.argv)
+            _created = True
 
-    result = {}
-    done = threading.Event()
+        result = {}
+        done = threading.Event()
 
-    def _run():
-        result["value"] = fn()
-        done.set()
+        def _run():
+            result["value"] = fn()
+            done.set()
+            if _created:
+                app.quit()
+
+        QTimer.singleShot(0, _run)
         if _created:
-            app.quit()
+            app.exec()
+        else:
+            done.wait(timeout=600)
 
-    QTimer.singleShot(0, _run)
-    if _created:
-        app.exec()
-    else:
-        done.wait(timeout=600)   # same ceiling as the old Swift IPC timeout
-
-    return result.get("value")
+        return result.get("value")
 
 
 # ── Dialogs ───────────────────────────────────────────────────────────────────
