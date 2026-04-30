@@ -47,7 +47,7 @@ def _run_qt_dialog(fn):
     """Run a Qt dialog safely from any thread, one at a time."""
     import sys
     from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtCore import QTimer
+    from PyQt6.QtCore import QTimer, QThread
 
     with _dialog_lock:
         app = QApplication.instance()
@@ -65,7 +65,17 @@ def _run_qt_dialog(fn):
             if _created:
                 app.quit()
 
-        QTimer.singleShot(0, _run)
+        # If we're already on the main thread, run directly
+        if QThread.currentThread() is app.thread():
+            _run()
+        else:
+            # Marshal to main thread via QTimer on the main thread
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.moveToThread(app.thread())
+            timer.timeout.connect(_run)
+            timer.start(0)
+
         if _created:
             app.exec()
         else:
