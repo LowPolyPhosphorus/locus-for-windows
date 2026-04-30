@@ -31,8 +31,6 @@ except Exception:
 
 # Always allowed, regardless of session
 ALWAYS_ALLOWED = {
-    "claude",
-    "vivaldi",
     "explorer",          # Windows Explorer / Finder equivalent
     "chrome",            # Google Chrome
     "cmd",               # Command Prompt
@@ -66,7 +64,7 @@ ALWAYS_ALLOWED = {
 
 # Substrings — any process whose name contains one of these is always allowed
 ALWAYS_ALLOWED_SUBSTRINGS = (
-    "helper", "agent", "daemon", "service", "extension",
+    "agent", "daemon", "service", "extension",
     "update", "crash", "runtime",
 )
 
@@ -147,6 +145,14 @@ class AppBlocker:
         self._running = True
         self._focus_app = None
         self._focus_since = time.time()
+        # Silent sweep: kill every disallowed GUI app currently running so we
+        # don't queue a stack of modal prompts the moment a session starts.
+        try:
+            for name, proc in self._get_running_gui_apps():
+                if not self._is_allowed(name):
+                    self._terminate_app(name, proc)
+        except Exception:
+            pass
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         self._focus_thread = threading.Thread(target=self._focus_loop, daemon=True)
@@ -258,23 +264,21 @@ class AppBlocker:
                         # Already showing dialog — keep killing if it respawns
                         self._terminate_app(name, proc)
                         continue
-                    # New violation — ask first, kill after
+                    # New violation
                     self._handling.add(name)
+                    self._terminate_app(name, proc)
                     threading.Thread(
                         target=self._handle_violation,
-                        args=(name, proc),
+                        args=(name,),
                         daemon=True,
                     ).start()
             except Exception as e:
                 print(f"[Locus] App blocker error: {e}")
             time.sleep(self.poll_seconds)
 
-    def _handle_violation(self, name: str, proc: Optional[psutil.Process] = None):
+    def _handle_violation(self, name: str):
         try:
             self.on_blocked(name)
-            # on_blocked returns after the dialog — if still not allowed, kill it
-            if not self._is_allowed(name):
-                self._terminate_app(name, proc)
         finally:
             self._handling.discard(name)
 
