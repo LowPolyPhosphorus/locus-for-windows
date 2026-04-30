@@ -31,8 +31,6 @@ except Exception:
 
 # Always allowed, regardless of session
 ALWAYS_ALLOWED = {
-    "vivaldi",
-    "claude",
     "explorer",          # Windows Explorer / Finder equivalent
     "chrome",            # Google Chrome
     "cmd",               # Command Prompt
