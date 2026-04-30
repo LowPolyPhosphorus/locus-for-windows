@@ -12,7 +12,7 @@ Website: **https://locusfocusapp.netlify.app**
 
 ## Install
 
-### Option A: Installer (easiest)
+### Option A: Installer (not available yet - no releases)
 1. Download **LocusSetup.exe** from the [Releases page](../../releases/latest).
 2. Run it, click through the prompts.
 3. Look for the Locus icon in your system tray (bottom-right corner, might be hiding under `^`).
