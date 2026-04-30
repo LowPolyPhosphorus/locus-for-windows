@@ -362,29 +362,15 @@ class FocusLockApp:
                 pass
             return
 
-        dialogs.show_notification("Locus", "Evaluating your reason…")
-        approved, explanation = self.claude.evaluate_reason(
-            subject=app_name, subject_type="app",
-            session_name=session_name, reason=reason,
-        )
         mins = self.config.get("temporary_allow_minutes", 15)
-        dialogs.show_result(approved, explanation, app_name, minutes=mins)
-
-        if approved:
-            self.app_blocker.allow_temporarily(app_name, minutes=mins)
-            self.app_blocker.open_app(app_name)
-            try:
-                log_event("app_allowed", app_name=app_name, reason="ai_approved",
-                          session_name=session_name)
-            except Exception:
-                pass
-        else:
-            self.app_blocker.deny(app_name)
-            try:
-                log_event("app_denied", app_name=app_name, reason="ai_denied",
-                          session_name=session_name)
-            except Exception:
-                pass
+        self.app_blocker.allow_temporarily(app_name, minutes=mins)
+        self.app_blocker.open_app(app_name)
+        dialogs.show_notification("Access granted", f"{app_name} allowed for {mins} min")
+        try:
+            log_event("app_allowed", app_name=app_name, reason="user_reason",
+                      session_name=session_name)
+        except Exception:
+            pass
 
     def _on_blocked_url(
         self,
