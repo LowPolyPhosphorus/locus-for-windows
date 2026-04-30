@@ -235,9 +235,11 @@ class AppBlocker:
 
     def _terminate_app(self, name: str, proc: Optional[psutil.Process] = None):
         """Gracefully close, then force-kill if needed."""
-        # Steam's visible window is owned by steamwebhelper — kill the root process instead
+        # Steam's visible window is owned by steamwebhelper — kill the full tree
         if "steam" in name:
+            subprocess.run(["taskkill", "/IM", "steamservice.exe", "/F", "/T"], capture_output=True)
             subprocess.run(["taskkill", "/IM", "steam.exe", "/F", "/T"], capture_output=True)
+            subprocess.run(["taskkill", "/IM", "steamwebhelper.exe", "/F", "/T"], capture_output=True)
             return
         exe = name if name.endswith(".exe") else name + ".exe"
         subprocess.run(["taskkill", "/IM", exe, "/T"], capture_output=True)
