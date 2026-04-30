@@ -170,7 +170,12 @@ class AppBlocker:
         self.temporarily_allowed.clear()
         self._handling.clear()
         self._focus_app = None
-        # Unblock the queue worker so it can exit
+        # Drain the queue so old violations don't carry into the next session
+        while not self._violation_queue.empty():
+            try:
+                self._violation_queue.get_nowait()
+            except queue.Empty:
+                break
         self._violation_queue.put(None)
 
     def open_app(self, app_name: str):
