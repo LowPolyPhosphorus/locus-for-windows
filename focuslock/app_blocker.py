@@ -9,6 +9,7 @@ Dependencies:
 import threading
 import time
 import subprocess
+import queue
 from typing import Set, Dict, Callable, Optional, List
 
 import psutil
@@ -31,20 +32,21 @@ except Exception:
 
 # Always allowed, regardless of session
 ALWAYS_ALLOWED = {
-    "explorer",          # Windows Explorer / Finder equivalent
+    "claude",            # Claude desktop app
+    "vivaldi",           # Vivaldi browser
+    "explorer",          # Windows Explorer
     "chrome",            # Google Chrome
     "cmd",               # Command Prompt
     "powershell",        # PowerShell
-    "WindowsTerminal",   # Windows Terminal
+    "windowsterminal",   # Windows Terminal
     "wt",                # Windows Terminal (alternate)
-    "FocusLock",
-    "FocusLockApp",
+    "focuslock",
+    "focuslockapp",
     "python",
     "python3",
     "pythonw",
-    "taskmgr",           # Task Manager (Activity Monitor equivalent)
-    "SystemSettings",    # Settings (System Preferences equivalent)
-    "Taskmgr",
+    "taskmgr",           # Task Manager
+    "systemsettings",    # Settings
     "dwm",               # Desktop Window Manager
     "csrss",             # Client/Server Runtime
     "winlogon",
@@ -52,13 +54,13 @@ ALWAYS_ALLOWED = {
     "svchost",
     "lsass",
     "spoolsv",
-    "SearchHost",
-    "SearchIndexer",
-    "ShellExperienceHost",
-    "StartMenuExperienceHost",
-    "TextInputHost",
-    "ctfmon",            # Input method / accessibility
-    "sihost",            # Shell infrastructure
+    "searchhost",
+    "searchindexer",
+    "shellexperiencehost",
+    "startmenuexperiencehost",
+    "textinputhost",
+    "ctfmon",
+    "sihost",
     "fontdrvhost",
 }
 
@@ -75,7 +77,7 @@ def _proc_name(proc: psutil.Process) -> str:
         name = proc.name()
         if name.lower().endswith(".exe"):
             name = name[:-4]
-        return name
+        return name.lower()
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return ""
 
@@ -114,14 +116,16 @@ class AppBlocker:
         self.session_allowed: Set[str] = set()
         self.temporarily_allowed: Dict[str, float] = {}
         self.user_always_allowed: Set[str] = set(
-            (n.lower() for n in (extra_always_allowed or []))
+            n.lower() for n in (extra_always_allowed or [])
         )
         self.on_blocked = on_blocked
         self.poll_seconds = max(0.5, float(poll_seconds))
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._queue_thread: Optional[threading.Thread] = None
         self._focus_thread: Optional[threading.Thread] = None
-        self._handling: Set[str] = set()
+        self._handling: Set[str] = set()          # names currently in queue or being shown
+        self._violation_queue: queue.Queue = queue.Queue()  # (name, proc) tuples
         self._focus_app: Optional[str] = None
         self._focus_since: float = 0.0
         self.session_name: str = ""
@@ -129,7 +133,6 @@ class AppBlocker:
     # ── Public API ────────────────────────────────────────────────────────
 
     def set_session_allowed(self, apps: List[str]):
-        """Set the list of apps allowed during this session (by display name or exe name)."""
         self.session_allowed = {a.lower() for a in apps}
 
     def allow_temporarily(self, app_name: str, minutes: int = 15):
@@ -145,16 +148,17 @@ class AppBlocker:
         self._running = True
         self._focus_app = None
         self._focus_since = time.time()
-        # Silent sweep: kill every disallowed GUI app currently running so we
-        # don't queue a stack of modal prompts the moment a session starts.
-        try:
-            for name, proc in self._get_running_gui_apps():
-                if not self._is_allowed(name):
-                    self._terminate_app(name, proc)
-        except Exception:
-            pass
+        # Drain any stale queue entries from a previous session
+        while not self._violation_queue.empty():
+            try:
+                self._violation_queue.get_nowait()
+            except queue.Empty:
+                break
+        self._handling.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+        self._queue_thread = threading.Thread(target=self._queue_worker, daemon=True)
+        self._queue_thread.start()
         self._focus_thread = threading.Thread(target=self._focus_loop, daemon=True)
         self._focus_thread.start()
 
@@ -165,16 +169,17 @@ class AppBlocker:
         self.temporarily_allowed.clear()
         self._handling.clear()
         self._focus_app = None
+        # Unblock the queue worker so it can exit
+        self._violation_queue.put(None)
 
     def open_app(self, app_name: str):
-        """Launch an application by name (uses Windows 'start' command)."""
         subprocess.Popen(["start", "", app_name], shell=True)
 
     # ── Allow checking ────────────────────────────────────────────────────
 
     def _is_allowed(self, name: str) -> bool:
-        """name is already lowercased."""
-        if name in {a.lower() for a in ALWAYS_ALLOWED}:
+        """name must already be lowercased."""
+        if name in ALWAYS_ALLOWED:
             return True
         if name in self.user_always_allowed:
             return True
@@ -193,15 +198,13 @@ class AppBlocker:
     def _get_running_gui_apps(self) -> List[tuple]:
         """Return (lowercased_name, proc) for every process that owns a visible window."""
         if not _WIN32:
-            # Fallback: return all non-system processes
             results = []
             for proc in psutil.process_iter(["pid", "name"]):
-                name = _proc_name(proc).lower()
+                name = _proc_name(proc)
                 if name:
                     results.append((name, proc))
             return results
 
-        # Collect PIDs that own at least one visible, non-minimised window
         gui_pids: Set[int] = set()
 
         def _cb(hwnd, _):
@@ -221,7 +224,7 @@ class AppBlocker:
         for proc in psutil.process_iter(["pid", "name"]):
             try:
                 if proc.pid in gui_pids:
-                    name = _proc_name(proc).lower()
+                    name = _proc_name(proc)
                     if name:
                         results.append((name, proc))
             except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -232,14 +235,9 @@ class AppBlocker:
 
     def _terminate_app(self, name: str, proc: Optional[psutil.Process] = None):
         """Gracefully close, then force-kill if needed."""
-        # 1. Try graceful close via taskkill /IM (sends WM_CLOSE)
         exe = name if name.endswith(".exe") else name + ".exe"
-        subprocess.run(
-            ["taskkill", "/IM", exe, "/T"],
-            capture_output=True,
-        )
+        subprocess.run(["taskkill", "/IM", exe, "/T"], capture_output=True)
         time.sleep(0.8)
-        # 2. Force-kill if still alive
         if proc is not None:
             try:
                 if proc.is_running():
@@ -247,12 +245,9 @@ class AppBlocker:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         else:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", exe, "/T"],
-                capture_output=True,
-            )
+            subprocess.run(["taskkill", "/F", "/IM", exe, "/T"], capture_output=True)
 
-    # ── Main loop ─────────────────────────────────────────────────────────
+    # ── Main poll loop ────────────────────────────────────────────────────
 
     def _loop(self):
         while self._running:
@@ -261,31 +256,49 @@ class AppBlocker:
                     if self._is_allowed(name):
                         continue
                     if name in self._handling:
-                        # Already showing dialog — keep killing if it respawns
+                        # Dialog already queued or showing — kill any respawn silently
                         self._terminate_app(name, proc)
                         continue
-                    # New violation
+                    # New violation — queue it, don't kill yet
                     self._handling.add(name)
-                    self._terminate_app(name, proc)
-                    threading.Thread(
-                        target=self._handle_violation,
-                        args=(name,),
-                        daemon=True,
-                    ).start()
+                    self._violation_queue.put((name, proc))
+                    print(f"[Locus] Queued violation: {name}")
             except Exception as e:
                 print(f"[Locus] App blocker error: {e}")
             time.sleep(self.poll_seconds)
 
-    def _handle_violation(self, name: str):
-        try:
-            self.on_blocked(name)
-        finally:
-            self._handling.discard(name)
+    # ── Queue worker — shows dialogs one at a time ────────────────────────
+
+    def _queue_worker(self):
+        """Single thread that processes violations one at a time, in order."""
+        while self._running:
+            try:
+                item = self._violation_queue.get(timeout=1)
+            except queue.Empty:
+                continue
+
+            if item is None:  # stop sentinel
+                break
+
+            name, proc = item
+            try:
+                # Check if still not allowed (user may have whitelisted it while queued)
+                if self._is_allowed(name):
+                    print(f"[Locus] {name} now allowed, skipping dialog")
+                    continue
+                # Show dialog — blocks until user responds
+                self.on_blocked(name)
+                # After dialog: if still not allowed, kill it
+                if not self._is_allowed(name):
+                    self._terminate_app(name, proc)
+            except Exception as e:
+                print(f"[Locus] Queue worker error for {name}: {e}")
+            finally:
+                self._handling.discard(name)
 
     # ── Focus tracking ────────────────────────────────────────────────────
 
     def _get_frontmost_app(self) -> Optional[str]:
-        """Return the exe name (no extension) of the foreground window's process."""
         if not _WIN32:
             return None
         try:
@@ -294,7 +307,7 @@ class AppBlocker:
                 return None
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             proc = psutil.Process(pid)
-            return _proc_name(proc).lower() or None
+            return _proc_name(proc) or None
         except Exception:
             return None
 
