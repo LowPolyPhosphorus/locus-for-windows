@@ -10,6 +10,7 @@ import threading
 import time
 import subprocess
 import queue
+import os
 from typing import Set, Dict, Callable, Optional, List
 
 import psutil
@@ -173,7 +174,15 @@ class AppBlocker:
         self._violation_queue.put(None)
 
     def open_app(self, app_name: str):
-        subprocess.Popen(["start", "", app_name], shell=True)
+        # Some apps need their full path — check common install locations
+        _known_paths = {
+            "steam": r"C:\Program Files (x86)\Steam\steam.exe",
+        }
+        path = _known_paths.get(app_name.lower())
+        if path and os.path.exists(path):
+            subprocess.Popen([path])
+        else:
+            subprocess.Popen(["start", "", app_name], shell=True)
 
     # ── Allow checking ────────────────────────────────────────────────────
 
@@ -301,9 +310,11 @@ class AppBlocker:
                     continue
                 # Show dialog — blocks until user responds
                 self.on_blocked(name)
-                # After dialog: if still not allowed, kill it
+                # After dialog: only kill if still not allowed (user denied)
                 if not self._is_allowed(name):
                     self._terminate_app(name, proc)
+                else:
+                    print(f"[Locus] {name} approved, leaving open")
             except Exception as e:
                 print(f"[Locus] Queue worker error for {name}: {e}")
             finally:
