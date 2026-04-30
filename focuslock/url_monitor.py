@@ -1,20 +1,17 @@
-"""Block websites in Chrome except those on the session whitelist. (Windows)
+"""Block websites in Chromium browsers except those on the session whitelist. (Windows)
 
-Replaces all macOS osascript/AppleScript Chrome control with Chrome's
-DevTools Protocol (CDP) over HTTP — more reliable, faster, and
-cross-platform.
+Supports Chrome, Vivaldi, Edge, and Brave -- any Chromium browser that
+accepts --remote-debugging-port=9222.
 
 How it works:
-    1. Chrome must be launched with --remote-debugging-port=9222
-       (Locus does this automatically via open_chrome_with_debug()).
+    1. A Chromium browser is launched with --remote-debugging-port=9222.
+       open_browser_with_debug() finds whichever supported browser is
+       installed (or already running with the debug port open).
     2. We poll /json/list to get all open tabs and their URLs/titles.
     3. To close/redirect a tab we POST to its webSocketDebuggerUrl.
 
 Dependencies:
     pip install requests websocket-client psutil
-
-Chrome launch flag (add to your Chrome shortcut or launcher):
-    chrome.exe --remote-debugging-port=9222 --remote-allow-origins=*
 """
 
 import threading
@@ -30,14 +27,14 @@ try:
     _REQUESTS = True
 except ImportError:
     _REQUESTS = False
-    print("[Locus] WARNING: 'requests' not installed — URL monitoring disabled.")
+    print("[Locus] WARNING: 'requests' not installed -- URL monitoring disabled.")
 
 try:
     import websocket  # websocket-client
     _WS = True
 except ImportError:
     _WS = False
-    print("[Locus] WARNING: 'websocket-client' not installed — tab control disabled.")
+    print("[Locus] WARNING: 'websocket-client' not installed -- tab control disabled.")
 
 try:
     import psutil as _psutil
@@ -54,10 +51,10 @@ except Exception:
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 CDP_HOST = "http://localhost:9222"
-CHROME_EXE_NAMES = ("chrome.exe", "chrome")
 
-# Internal browser pages — never block these
-INTERNAL_SCHEMES = {"chrome", "about", "data", "chrome-extension", "devtools"}
+# Internal browser pages -- never block these
+INTERNAL_SCHEMES = {"chrome", "about", "data", "chrome-extension", "devtools",
+                    "vivaldi", "edge", "brave"}
 
 # Always allowed in any session
 ALWAYS_ALLOWED_DOMAINS = {"notion.so", "notionusercontent.com", "music.youtube.com"}
@@ -65,41 +62,99 @@ ALWAYS_ALLOWED_DOMAINS = {"notion.so", "notionusercontent.com", "music.youtube.c
 # Tab titles too generic to check
 TITLE_IGNORE = {"youtube", "youtube music", "google", "new tab", "claude", ""}
 
+# Supported Chromium browsers in preference order.
+# Each entry is (display_name, list_of_candidate_exe_paths, process_names_to_check)
+_BROWSER_CANDIDATES = [
+    (
+        "Vivaldi",
+        [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Vivaldi", "Application", "vivaldi.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Vivaldi", "Application", "vivaldi.exe"),
+        ],
+        ("vivaldi.exe",),
+    ),
+    (
+        "Google Chrome",
+        [
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        ],
+        ("chrome.exe",),
+    ),
+    (
+        "Microsoft Edge",
+        [
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft", "Edge", "Application", "msedge.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft", "Edge", "Application", "msedge.exe"),
+        ],
+        ("msedge.exe",),
+    ),
+    (
+        "Brave",
+        [
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+        ],
+        ("brave.exe",),
+    ),
+]
 
-# ── Chrome launcher ───────────────────────────────────────────────────────────
 
-def open_chrome_with_debug(url: str = "about:blank"):
-    """Launch Chrome with the remote debugging port open.
-    Safe to call if Chrome is already running — CDP is already available."""
-    chrome_path = _find_chrome()
-    if not chrome_path:
-        print("[Locus] Chrome not found — cannot open with debug port.")
+# ── Browser launcher ──────────────────────────────────────────────────────────
+
+def _cdp_reachable() -> bool:
+    """Return True if something is already listening on the CDP port."""
+    if not _REQUESTS:
+        return False
+    try:
+        _requests.get(f"{CDP_HOST}/json/version", timeout=1)
+        return True
+    except Exception:
+        return False
+
+
+def _find_browser() -> Optional[tuple]:
+    """Return (display_name, exe_path) for the first installed supported browser."""
+    for name, paths, _ in _BROWSER_CANDIDATES:
+        for path in paths:
+            if path and os.path.exists(path):
+                return name, path
+    return None
+
+
+def open_browser_with_debug(url: str = "about:blank"):
+    """Launch a Chromium browser with the remote debugging port open.
+
+    If a browser is already running with CDP available, does nothing.
+    Tries Vivaldi, Chrome, Edge, Brave in that order.
+    """
+    if _cdp_reachable():
+        return  # already up
+
+    result = _find_browser()
+    if not result:
+        print("[Locus] No supported Chromium browser found (tried Vivaldi, Chrome, Edge, Brave).")
         return
+
+    name, path = result
+    print(f"[Locus] Launching {name} with debug port...")
     subprocess.Popen([
-        chrome_path,
+        path,
         "--remote-debugging-port=9222",
         "--remote-allow-origins=*",
         url,
     ])
 
 
-def _find_chrome() -> Optional[str]:
-    """Find the Chrome executable on Windows."""
-    candidates = [
-        os.path.join(os.environ.get("PROGRAMFILES", ""), "Google", "Chrome", "Application", "chrome.exe"),
-        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return None
+# Keep the old name as an alias so any existing callers don't break
+open_chrome_with_debug = open_browser_with_debug
 
 
 # ── CDP helpers ───────────────────────────────────────────────────────────────
 
 def _cdp_tabs() -> List[dict]:
-    """Return a list of tab dicts from Chrome's /json/list endpoint."""
+    """Return a list of tab dicts from the browser's /json/list endpoint."""
     if not _REQUESTS:
         return []
     try:
@@ -164,11 +219,10 @@ class URLMonitor:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._title_thread: Optional[threading.Thread] = None
-        # domain -> set of tab IDs currently being handled
         self._handling: Set[str] = set()
-        self._handling_origin: Dict[str, str] = {}   # domain -> ws_url of origin tab
-        self._last_url_by_tab: Dict[str, str] = {}   # ws_url -> last seen url
-        self._last_title_by_tab: Dict[str, str] = {} # ws_url -> last seen title
+        self._handling_origin: Dict[str, str] = {}
+        self._last_url_by_tab: Dict[str, str] = {}
+        self._last_title_by_tab: Dict[str, str] = {}
         self._title_cooldown_until: Dict[str, float] = {}
         self.session_name: str = ""
 
@@ -215,21 +269,16 @@ class URLMonitor:
         self.temporarily_allowed.clear()
         self._handling.clear()
         self._handling_origin.clear()
-        self._last_checked_title = ""
         self._title_cooldown_until.clear()
 
-    # ── Tab control (replaces all osascript) ──────────────────────────────
+    # ── Tab control ───────────────────────────────────────────────────────
 
     def close_tab(self, ws_url: str):
-        """Close a specific tab by its WebSocket debugger URL."""
-        tabs = _cdp_tabs()
-        # If it's the only tab in its window, navigate to blank instead
-        tab = next((t for t in tabs if t.get("webSocketDebuggerUrl") == ws_url), None)
+        tab = next((t for t in _cdp_tabs() if t.get("webSocketDebuggerUrl") == ws_url), None)
         if tab:
             _close_tab(ws_url)
 
     def close_active_tab(self):
-        """Close (or blank) the frontmost Chrome tab."""
         tabs = _cdp_tabs()
         if tabs:
             ws_url = tabs[0].get("webSocketDebuggerUrl", "")
@@ -247,17 +296,14 @@ class URLMonitor:
             _navigate_tab(tabs[0]["webSocketDebuggerUrl"], url)
 
     def open_url_in_new_tab(self, url: str):
-        """Open a URL in a new Chrome tab via CDP."""
         if not _REQUESTS:
             return
         try:
-            resp = _requests.get(f"{CDP_HOST}/json/new?{url}", timeout=2)
+            _requests.get(f"{CDP_HOST}/json/new?{url}", timeout=2)
         except Exception:
             pass
 
     def pin_tab_to_blank(self, ws_url: str):
-        """Return a stop callable. Background thread keeps the tab on about:blank,
-        snapping back if the user presses back/forward to escape."""
         stop = threading.Event()
 
         def watcher():
@@ -309,7 +355,6 @@ class URLMonitor:
                 tabs = _cdp_tabs()
                 live_ws = {t["webSocketDebuggerUrl"] for t in tabs if "webSocketDebuggerUrl" in t}
 
-                # Drop stale cache entries
                 for stale in list(self._last_url_by_tab):
                     if stale not in live_ws:
                         self._last_url_by_tab.pop(stale, None)
@@ -332,7 +377,6 @@ class URLMonitor:
                         self._last_url_by_tab.pop(ws_url, None)
 
                         if domain in self._handling:
-                            # Dialog already running; block bypass attempts
                             if self._handling_origin.get(domain) != ws_url:
                                 _navigate_tab(ws_url, "about:blank")
                             continue
