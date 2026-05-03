@@ -203,22 +203,36 @@ class StateWatcher(QObject):
 
 SIDEBAR_WIDTH = 220
 
-SIDEBAR_STYLE = f"""
+WINDOW_STYLE = f"""
+/* ── Root window and all bare widgets default to cream ── */
+QDialog, QWidget {{
+    background-color: {SURFACE};
+    color: {TEXT_PRIMARY};
+    font-family: 'Segoe UI', sans-serif;
+}}
+
+/* ── Sidebar ── */
 QWidget#sidebar {{
     background-color: {SURFACE};
     border-right: 1px solid {BORDER};
 }}
+
+/* ── App title ── */
 QLabel#app_title {{
     font-family: 'Georgia', 'Times New Roman', serif;
     font-size: 20px;
     color: {TEXT_PRIMARY};
+    background: transparent;
 }}
+
+/* ── Nav buttons ── */
 QPushButton#nav_row {{
     background: transparent;
     border: none;
     text-align: left;
     padding: 9px 12px;
     font-size: 14px;
+    font-weight: 400;
     color: {TEXT_PRIMARY};
     border-radius: 8px;
 }}
@@ -235,25 +249,38 @@ QPushButton#nav_row_selected {{
     color: {TEXT_PRIMARY};
     border-radius: 8px;
 }}
-"""
 
-CONTENT_STYLE = f"""
+/* ── Content area ── */
 QWidget#content_panel {{
     background-color: {SURFACE};
 }}
+QScrollArea, QScrollArea > QWidget > QWidget {{
+    background-color: {SURFACE};
+    border: none;
+}}
+
+/* ── Typography ── */
 QLabel#pane_heading {{
     font-family: 'Georgia', 'Times New Roman', serif;
     font-size: 32px;
     color: {TEXT_PRIMARY};
+    background: transparent;
 }}
 QLabel#pane_subheading {{
     font-size: 13px;
     color: {TEXT_SECONDARY};
+    background: transparent;
 }}
-QFrame#card {{
-    background-color: {CARD};
-    border: 1px solid {BORDER};
-    border-radius: 12px;
+QLabel#locus_title {{
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 46px;
+    color: {TEXT_PRIMARY};
+    background: transparent;
+}}
+QLabel#status_text {{
+    font-size: 15px;
+    color: {TEXT_SECONDARY};
+    background: transparent;
 }}
 QLabel#field_label {{
     font-family: 'Consolas', monospace;
@@ -261,11 +288,22 @@ QLabel#field_label {{
     font-weight: 600;
     color: {TEXT_SECONDARY};
     letter-spacing: 1px;
+    background: transparent;
 }}
 QLabel#secondary {{
     font-size: 11px;
     color: {TEXT_SECONDARY};
+    background: transparent;
 }}
+
+/* ── Cards ── */
+QFrame#card {{
+    background-color: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 12px;
+}}
+
+/* ── Input ── */
 QLineEdit {{
     background-color: {SURFACE};
     border: 1px solid {BORDER};
@@ -273,17 +311,139 @@ QLineEdit {{
     padding: 7px 10px;
     font-size: 14px;
     color: {TEXT_PRIMARY};
+    selection-background-color: {ACCENT_MUTED};
 }}
 QLineEdit:focus {{
     border-color: {ACCENT};
+    outline: none;
+}}
+
+/* ── Scrollbar ── */
+QScrollBar:vertical {{
+    background: {SURFACE};
+    width: 6px;
+    border-radius: 3px;
+}}
+QScrollBar::handle:vertical {{
+    background: {BORDER};
+    border-radius: 3px;
+    min-height: 20px;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+}}
+
+/* ── Event list ── */
+QListWidget {{
+    background: transparent;
+    border: none;
+    outline: none;
+    color: {TEXT_PRIMARY};
+}}
+QListWidget::item {{
+    background-color: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 9px 12px;
+    margin-bottom: 4px;
+    font-size: 13px;
+    color: {TEXT_PRIMARY};
+}}
+QListWidget::item:selected {{
+    background-color: {ACCENT_MUTED};
+    border: 1px solid rgba(232,160,32,0.4);
+    color: {TEXT_PRIMARY};
+}}
+QListWidget::item:hover {{
+    background-color: {ACCENT_MUTED};
+}}
+
+/* ── Primary button ── */
+QPushButton#primary {{
+    background-color: {ACCENT};
+    color: #1A1100;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#primary:hover {{ background-color: #D4901A; }}
+QPushButton#primary:pressed {{ background-color: #BF811A; }}
+QPushButton#primary:disabled {{ background-color: {CARD}; color: {TEXT_SECONDARY}; }}
+
+/* ── Secondary button ── */
+QPushButton#secondary {{
+    background-color: transparent;
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 9px 14px;
+    font-size: 13px;
+    font-weight: 500;
+}}
+QPushButton#secondary:hover {{ background-color: {CARD}; }}
+QPushButton#secondary:pressed {{ background-color: {BORDER}; }}
+
+/* ── Wide start button ── */
+QPushButton#start_btn {{
+    background-color: {ACCENT};
+    color: #1A1100;
+    border: none;
+    border-radius: 12px;
+    padding: 14px 40px;
+    font-size: 15px;
+    font-weight: 600;
+    min-width: 180px;
+}}
+QPushButton#start_btn:hover {{ background-color: #D4901A; }}
+QPushButton#start_btn:pressed {{ background-color: #BF811A; }}
+QPushButton#start_btn:disabled {{ background-color: {CARD}; color: {TEXT_SECONDARY}; }}
+
+/* ── End session button ── */
+QPushButton#end_btn {{
+    background-color: #E53935;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 14px 40px;
+    font-size: 15px;
+    font-weight: 600;
+    min-width: 180px;
+}}
+QPushButton#end_btn:hover {{ background-color: #C62828; }}
+QPushButton#end_btn:pressed {{ background-color: #B71C1C; }}
+
+/* ── Menu ── */
+QMenu {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 4px;
+    font-size: 13px;
+    color: {TEXT_PRIMARY};
+}}
+QMenu::item {{
+    padding: 7px 16px;
+    border-radius: 6px;
+    color: {TEXT_PRIMARY};
+}}
+QMenu::item:selected {{
+    background-color: {ACCENT_MUTED};
+    color: {TEXT_PRIMARY};
+}}
+QMenu::separator {{
+    height: 1px;
+    background: {BORDER};
+    margin: 4px 8px;
 }}
 """
 
 PANES = [
-    ("Start",      "▶",  "start"),
-    ("Settings",   "⚙",  "settings"),
-    ("Connectors", "⚡", "connectors"),
-    ("Analytics",  "📊", "analytics"),
+    ("Start",      "start"),
+    ("Settings",   "settings"),
+    ("Connectors", "connectors"),
+    ("Analytics",  "analytics"),
 ]
 
 
@@ -292,7 +452,7 @@ class LocusWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Locus")
         self.setMinimumSize(720, 520)
-        self.setStyleSheet(SIDEBAR_STYLE + CONTENT_STYLE + STYLESHEET)
+        self.setStyleSheet(WINDOW_STYLE)
         self.setWindowFlag(Qt.WindowType.Window)
 
         self._current_pane = "start"
@@ -348,8 +508,8 @@ class LocusWindow(QDialog):
         nav_layout.setSpacing(2)
         nav_layout.setContentsMargins(10, 0, 10, 0)
 
-        for label, icon, key in PANES:
-            btn = QPushButton(f"  {icon}   {label}")
+        for label, key in PANES:
+            btn = QPushButton(f"  {label}")
             btn.setObjectName("nav_row")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _, k=key: self._show_pane(k))
@@ -411,25 +571,39 @@ class LocusWindow(QDialog):
         layout.setSpacing(0)
         layout.setContentsMargins(32, 32, 32, 32)
 
-        # Lock icon circle
-        icon_circle = QFrame()
+        # Lock icon circle — drawn pixmap, no emoji
+        icon_circle = QLabel()
         icon_circle.setFixedSize(100, 100)
+        icon_circle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         session_active = self._session_info is not None
-        circle_bg = "rgba(229,57,53,0.10)" if session_active else ACCENT_MUTED
-        icon_char = "🔒" if session_active else "🔓"
+        circle_bg = "rgba(229,57,53,20)" if session_active else ACCENT_MUTED
         icon_color = "#E53935" if session_active else ACCENT
         icon_circle.setStyleSheet(f"""
-            QFrame {{
+            QLabel {{
                 background-color: {circle_bg};
                 border-radius: 50px;
+                font-size: 42px;
             }}
         """)
-        il = QVBoxLayout(icon_circle)
-        il.setContentsMargins(0, 0, 0, 0)
-        icon_lbl = QLabel(icon_char)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet(f"font-size: 42px; color: {icon_color}; background: transparent;")
-        il.addWidget(icon_lbl)
+        # Draw lock pixmap
+        px = QPixmap(60, 60)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        lock_color = QColor(icon_color)
+        p.setBrush(QBrush(lock_color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(8, 28, 44, 28, 5, 5)  # body
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        pen = QPen(lock_color, 6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        if session_active:
+            p.drawArc(16, 6, 28, 28, 0, 180 * 16)
+        else:
+            p.drawArc(16, 2, 28, 28, 0, 135 * 16)
+        p.end()
+        icon_circle.setPixmap(px)
 
         icon_row = QHBoxLayout()
         icon_row.addStretch()
@@ -442,11 +616,7 @@ class LocusWindow(QDialog):
         # "Locus" serif title
         locus_lbl = QLabel("Locus")
         locus_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        locus_lbl.setStyleSheet(f"""
-            font-family: 'Georgia', 'Times New Roman', serif;
-            font-size: 46px;
-            color: {TEXT_PRIMARY};
-        """)
+        locus_lbl.setObjectName("locus_title")
         layout.addWidget(locus_lbl)
 
         layout.addSpacing(6)
@@ -456,11 +626,11 @@ class LocusWindow(QDialog):
             status_row = QHBoxLayout()
             status_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
             dot = QLabel("●")
-            dot.setStyleSheet("color: #E53935; font-size: 10px;")
+            dot.setStyleSheet(f"color: #E53935; font-size: 10px; background: transparent;")
             status_row.addWidget(dot)
             name = self._session_info.get("display_name", "Session")
             name_lbl = QLabel(name)
-            name_lbl.setStyleSheet(f"font-size: 15px; font-weight: 500; color: {TEXT_PRIMARY};")
+            name_lbl.setStyleSheet(f"font-size: 15px; font-weight: 500; color: {TEXT_PRIMARY}; background: transparent;")
             status_row.addWidget(name_lbl)
             w = QWidget()
             w.setLayout(status_row)
@@ -468,7 +638,7 @@ class LocusWindow(QDialog):
         else:
             status_lbl = QLabel("Ready to focus")
             status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            status_lbl.setObjectName("secondary")
+            status_lbl.setObjectName("status_text")
             layout.addWidget(status_lbl)
 
         layout.addSpacing(28)
@@ -499,11 +669,9 @@ class LocusWindow(QDialog):
             layout.addLayout(card_row)
             layout.addSpacing(20)
 
-            end_btn = _primary_btn("⬛  End Session")
-            end_btn.setStyleSheet(end_btn.styleSheet() + """
-                QPushButton { background-color: #E53935; padding: 14px 40px; border-radius: 12px; font-size: 15px; }
-                QPushButton:hover { background-color: #C62828; }
-            """)
+            end_btn = QPushButton("End Session")
+            end_btn.setObjectName("end_btn")
+            end_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             end_btn.clicked.connect(self._end_session)
             btn_row = QHBoxLayout()
             btn_row.addStretch()
@@ -526,8 +694,9 @@ class LocusWindow(QDialog):
             self._custom_input.setPlaceholderText("e.g. Write essay intro")
             cl.addWidget(self._custom_input)
 
-            start_btn = _primary_btn("▶  Start Session")
-            start_btn.setStyleSheet(start_btn.styleSheet() + "QPushButton { padding: 14px 40px; border-radius: 12px; font-size: 15px; }")
+            start_btn = QPushButton("Start Session")
+            start_btn.setObjectName("start_btn")
+            start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             start_btn.clicked.connect(self._start_custom_session)
             self._custom_input.returnPressed.connect(self._start_custom_session)
 
@@ -591,27 +760,6 @@ class LocusWindow(QDialog):
         layout.addWidget(up_lbl)
 
         self._event_list = QListWidget()
-        self._event_list.setStyleSheet(f"""
-            QListWidget {{
-                background: transparent;
-                border: none;
-                outline: none;
-            }}
-            QListWidget::item {{
-                background-color: {CARD};
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-                padding: 9px 12px;
-                margin-bottom: 4px;
-                font-size: 13px;
-                color: {TEXT_PRIMARY};
-            }}
-            QListWidget::item:selected {{
-                background-color: {ACCENT_MUTED};
-                border: 1px solid rgba(232,160,32,0.4);
-                color: {TEXT_PRIMARY};
-            }}
-        """)
         self._event_list.setMaximumHeight(200)
 
         for ev in self._events:
@@ -625,8 +773,9 @@ class LocusWindow(QDialog):
 
         layout.addWidget(self._event_list)
 
-        start_ev_btn = _primary_btn("▶  Start Session")
-        start_ev_btn.setStyleSheet(start_ev_btn.styleSheet() + "QPushButton { padding: 14px 40px; border-radius: 12px; font-size: 15px; }")
+        start_ev_btn = QPushButton("Start Session")
+        start_ev_btn.setObjectName("start_btn")
+        start_ev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         start_ev_btn.clicked.connect(self._start_event_session)
         self._event_list.doubleClicked.connect(self._start_event_session)
 
@@ -733,29 +882,7 @@ class LocusTrayApp(QSystemTrayIcon):
 
     def _build_menu(self):
         menu = QMenu()
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {SURFACE};
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-                padding: 4px;
-                font-size: 13px;
-                color: {TEXT_PRIMARY};
-            }}
-            QMenu::item {{
-                padding: 7px 16px;
-                border-radius: 6px;
-            }}
-            QMenu::item:selected {{
-                background-color: {ACCENT_MUTED};
-                color: {TEXT_PRIMARY};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: {BORDER};
-                margin: 4px 8px;
-            }}
-        """)
+        menu.setStyleSheet(WINDOW_STYLE)
 
         self._status_action = menu.addAction("Locus — idle")
         self._status_action.setEnabled(False)
