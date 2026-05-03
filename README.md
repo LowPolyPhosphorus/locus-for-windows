@@ -6,7 +6,7 @@ If something gets blocked that you actually need, it asks why. The AI reads your
 
 > Windows port of the original [Locus](https://github.com/K-man1/locus) by [K-man1](https://github.com/K-man1), who built the macOS app, the website, and all the original code. This repo adapts it for Windows.
 
-Website: **https://locusfocusapp.netlify.app**
+Website: **https://locusfoucsapp.netlify.app**
 
 ---
 
