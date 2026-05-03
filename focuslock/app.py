@@ -23,7 +23,7 @@ from .notion_client import NotionClient, NotionEvent
 from .ical_client import ICalClient
 from .claude_client import ClaudeClient
 from .app_blocker import AppBlocker
-from .url_monitor import URLMonitor
+from .url_monitor import URLMonitor, open_browser_with_debug, _cdp_reachable, _find_running_browser
 from .session import FocusSession
 from . import dialogs
 from .analytics import log_event, compute_summary
@@ -290,10 +290,29 @@ class FocusLockApp:
 
         self.url_monitor.set_session_allowed_domains(session.allow_domains)
         self.url_monitor.session_name = session.display_name
-        self.url_monitor.start()
+
+        # If the browser needs relaunching, warn the user first.
+        # If they cancel, skip website blocking for this session.
+        if not _cdp_reachable():
+            browser_info = _find_running_browser()
+            if browser_info:
+                browser_name = browser_info[0]
+                confirmed = dialogs.ask_browser_relaunch(browser_name)
+                if confirmed:
+                    open_browser_with_debug()
+                    self.url_monitor.start()
+                else:
+                    print("[Locus] User skipped browser relaunch -- website blocking disabled for this session.")
+            else:
+                # No browser running at all -- just launch one with the flag
+                open_browser_with_debug()
+                self.url_monitor.start()
+        else:
+            # CDP already reachable, no relaunch needed
+            self.url_monitor.start()
 
         self._write_state()
-        dialogs.show_notification("🔴 Locus Active", session.display_name)
+        dialogs.show_notification("Locus Active", session.display_name)
 
     def _end_session(self, _):
         if not self.current_session:
@@ -362,7 +381,7 @@ class FocusLockApp:
                 pass
             return
 
-        dialogs.show_notification("Locus", "Evaluating your reason…")
+        dialogs.show_notification("Locus", "Evaluating your reason...")
         approved, explanation = self.claude.evaluate_reason(
             subject=app_name, subject_type="app",
             session_name=session_name, reason=reason,
@@ -390,12 +409,11 @@ class FocusLockApp:
         self,
         domain: str,
         original_url: str,
-        ws_url: Optional[str],   # CDP WebSocket URL — replaces tab_id: int
+        ws_url: Optional[str],
         tab_title: str = "",
     ):
         session_name = self.current_session.display_name if self.current_session else "Focus Session"
 
-        # Smart pre-screen: check if the site is obviously relevant
         auto_allow, ai_reason = self.claude.evaluate_site_relevance(
             domain, session_name, tab_title,
         )
@@ -410,13 +428,11 @@ class FocusLockApp:
                 pass
             return
 
-        # Redirect the tab to about:blank while the dialog is shown
         if ws_url:
             self.url_monitor.redirect_tab(ws_url, "about:blank")
         else:
             self.url_monitor.close_active_tab()
 
-        # Pin to blank — defeats Chrome back/forward navigation during dialog
         stop_pin = self.url_monitor.pin_tab_to_blank(ws_url) if ws_url else (lambda: None)
         try:
             action, reason = dialogs.ask_reason(domain, "website", session_name)
@@ -464,7 +480,7 @@ class FocusLockApp:
                 pass
             return
 
-        dialogs.show_notification("Locus", "Evaluating your reason…")
+        dialogs.show_notification("Locus", "Evaluating your reason...")
         approved, explanation = self.claude.evaluate_reason(
             subject=domain, subject_type="website",
             session_name=session_name, reason=reason,
@@ -495,9 +511,8 @@ class FocusLockApp:
         self,
         domain: str,
         tab_title: str,
-        ws_url: Optional[str],   # CDP WebSocket URL — replaces tab_id: int
+        ws_url: Optional[str],
     ):
-        """Called when a temporarily-allowed site shows potentially off-topic content."""
         session_name = self.current_session.display_name if self.current_session else "Focus Session"
 
         relevant, ai_reason = self.claude.evaluate_title(tab_title, session_name, domain)
@@ -510,16 +525,13 @@ class FocusLockApp:
         except Exception:
             pass
 
-        # Check tab status via CDP tab list
         if ws_url:
             from .url_monitor import _cdp_tabs
             live_ws = {t.get("webSocketDebuggerUrl") for t in _cdp_tabs()}
             if ws_url not in live_ws:
-                # Tab gone — just revoke the domain
                 self.url_monitor.temporarily_allowed.pop(domain, None)
                 return
 
-        # Revoke + close the tab
         self.url_monitor.revoke_domain(domain, ws_url=ws_url)
 
         action, user_reason = dialogs.ask_off_topic_reason(
@@ -529,9 +541,9 @@ class FocusLockApp:
         if action == "cancel" or not user_reason.strip():
             return
 
-        dialogs.show_notification("Locus", "Evaluating your reason…")
+        dialogs.show_notification("Locus", "Evaluating your reason...")
         approved, explanation = self.claude.evaluate_reason(
-            subject=f"{domain} — \"{tab_title}\"",
+            subject=f"{domain} -- \"{tab_title}\"",
             subject_type="website content",
             session_name=session_name,
             reason=user_reason,
@@ -548,11 +560,6 @@ class FocusLockApp:
 # ── Single-instance lock ──────────────────────────────────────────────────────
 
 def _acquire_single_instance_lock():
-    """Ensure only one locusd is running.
-
-    On Windows, os.kill(pid, 0) works for the liveness probe but SIGTERM
-    isn't reliably deliverable, so we use psutil for the check when available.
-    """
     try:
         os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
         if os.path.exists(LOCK_PATH):
@@ -571,7 +578,7 @@ def _acquire_single_instance_lock():
                         os.kill(other_pid, 0)
                         alive = True
                     except (ProcessLookupError, PermissionError):
-                        alive = True  # conservative
+                        alive = True
                 if alive:
                     print(f"[Locus] Another locusd is already running (pid {other_pid}); exiting.")
                     raise SystemExit(0)
@@ -595,11 +602,8 @@ def _release_lock():
 
 def main():
     _acquire_single_instance_lock()
-    app = FocusLockApp()  # noqa: F841 -- worker threads run on it
+    app = FocusLockApp()  # noqa: F841
 
-    # Signal handlers can only be registered on the main thread.
-    # When running as a background thread inside tray_app.py we skip them --
-    # the tray app handles shutdown by just exiting the process.
     import threading as _threading
     if _threading.current_thread() is _threading.main_thread():
         stop = _threading.Event()
@@ -618,8 +622,6 @@ def main():
         finally:
             _release_lock()
     else:
-        # Running as a daemon thread -- just block forever.
-        # The process exits when the tray UI quits.
         try:
             while True:
                 time.sleep(60)
