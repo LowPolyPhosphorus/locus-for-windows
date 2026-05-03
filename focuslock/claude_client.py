@@ -36,15 +36,25 @@ Session: **{session_name}**
 Blocked {subject_type}: **{subject}**
 Student's reason: "{reason}"
 
-Important context:
-- "Focus session" does NOT always mean homework. It can mean a coding project, hackathon, game dev, creative work, or any personal project.
-- If the session name suggests a dev/tech/creative project (e.g. contains words like "hack", "project", "game", "build", "code", "app", "dev"), be MORE lenient about technical tools -- Steam (for testing games), Unity, VS Code, terminals, browsers, etc. are likely legitimate.
-- If the session name suggests academic work (e.g. "math homework", "essay", "study"), be stricter about unrelated apps.
-- Give the student the benefit of the doubt. Only deny if the reason is clearly unrelated or obviously an excuse.
-- Be more strict for entertainment apps with no plausible work use (Netflix, TikTok, etc.).
+Decide if the request is approved and how long to allow it.
+
+DURATION guidelines -- be generous with tools, strict with distractions:
+- Productivity tools, IDEs, coding tools, terminals, reference apps, debuggers: FOREVER
+- Educational sites directly relevant to the session (Khan Academy, Desmos, docs, Stack Overflow, Wikipedia): FOREVER
+- Utility sites with a clear one-time use (converting a file, checking a definition, translating something): 15 minutes
+- Sites or apps that are useful but could easily spiral into distraction (YouTube, Reddit, Discord, Spotify): 15-30 minutes max
+- Pure entertainment with a weak but plausible justification (Netflix, TikTok, Twitter): 10 minutes max
+- Clearly an excuse or totally unrelated: DENY
+
+Context:
+- Focus sessions can be coding projects, hackathons, game dev, creative work -- not just homework.
+- If the session name suggests dev/tech/creative work, be more lenient about technical tools.
+- If the session name suggests academic work (math homework, essay, study), be stricter about unrelated apps.
+- Give the student the benefit of the doubt. Only deny if the reason is clearly bogus.
 
 Respond in exactly this format:
 DECISION: APPROVED or DENIED
+DURATION: forever, or a number of minutes like 15 (only include if APPROVED)
 REASON: One sentence."""
 
 DEFAULT_EVALUATE_SITE_RELEVANCE = """You are a focus session enforcer for a high school student.
@@ -56,22 +66,21 @@ Use your knowledge of what this website actually is and does. If you know the si
 
 Should this site be AUTO-ALLOWED without interrupting the student, or should we ASK them to justify it?
 
-AUTO-ALLOW when the site is clearly a legitimate tool for this session -- for example:
+AUTO-ALLOW when the site is clearly a legitimate tool for this session:
 - Reference/research tools directly related to the subject (calculators, dictionaries, documentation)
 - Search engines when the page title suggests they're searching for something relevant
 - Schoology, Canvas, or any LMS
 - Stack Overflow, MDN, or coding docs during a coding session
 - Khan Academy, SpanishDict, or similar educational tools during a matching session
-- Any site that is obviously a tool, not entertainment
+- Any site that is obviously a tool and not entertainment
 
-ASK when there is any real doubt -- for example:
+ASK when there is any real doubt:
 - YouTube (even if it could be a tutorial -- ask first)
 - Social media of any kind (Reddit, Twitter/X, Discord, TikTok, Instagram)
-- Streaming (Netflix, Twitch, Spotify with video)
+- Streaming (Netflix, Twitch, Spotify)
 - Gaming sites or Steam store pages
-- Shopping
-- News sites unrelated to the session topic
-- Any site you don't recognize and the page context doesn't make relevant
+- Shopping, news sites unrelated to the session
+- Any site you don't recognize and the page context doesn't make obviously relevant
 
 When in doubt, ASK. It takes the student 10 seconds to justify it.
 
@@ -92,8 +101,6 @@ Examples of OFF-TOPIC:
 
 Be lenient for search pages, homepages, and ambiguous titles.
 Be strict when the title clearly contradicts the session subject.
-Be understanding of mistakes such as typos or misclicks.
-If the user says they got sidetracked, but will refocus, allow it.
 
 Respond in exactly this format:
 DECISION: RELEVANT or OFF-TOPIC
@@ -101,28 +108,19 @@ REASON: One sentence."""
 
 
 def _scrape_site_context(domain: str) -> str:
-    """Fetch the site's title and meta description to give the AI more context.
-
-    Returns a short string like:
-        Page title: "Desmos | Graphing Calculator"
-        Description: "A beautiful, free online graphing calculator..."
-    Or an empty string if the scrape fails or times out.
-    """
+    """Fetch the site's title and meta description to give the AI more context."""
     try:
-        url = f"https://{domain}"
-        resp = requests.get(url, timeout=4, headers={
+        resp = requests.get(f"https://{domain}", timeout=4, headers={
             "User-Agent": "Mozilla/5.0 (compatible; Locus/1.0)",
         }, allow_redirects=True)
-        html = resp.text[:8000]  # only read the head section
+        html = resp.text[:8000]
 
-        # Pull <title>
         title = ""
         t_start = html.lower().find("<title>")
         t_end = html.lower().find("</title>")
         if t_start != -1 and t_end != -1:
             title = html[t_start + 7:t_end].strip()[:120]
 
-        # Pull meta description
         desc = ""
         import re
         m = re.search(
@@ -143,9 +141,22 @@ def _scrape_site_context(domain: str) -> str:
         if desc:
             parts.append(f'Description: "{desc}"')
         return "\n" + "\n".join(parts) if parts else ""
-
     except Exception:
         return ""
+
+
+def _parse_duration(text: str, default_minutes: int = 15) -> int:
+    """Parse DURATION line. Returns -1 for forever, else minutes as int."""
+    import re
+    for line in text.split("\n"):
+        if line.upper().strip().startswith("DURATION:"):
+            val = line.split(":", 1)[1].strip().lower()
+            if val in ("forever", "permanent", "unlimited", "always", "session"):
+                return -1
+            m = re.search(r'\d+', val)
+            if m:
+                return int(m.group())
+    return default_minutes
 
 
 def _load_config() -> dict:
@@ -164,7 +175,6 @@ class ClaudeClient:
         return val if val else default
 
     def _post(self, prompt: str) -> tuple[bool, str, str]:
-        """Returns (ok, raw_text, error_str)."""
         payload = {"prompt": prompt, "device_id": _device_id()}
         try:
             resp = requests.post(PROXY_URL, json=payload, timeout=15)
@@ -181,8 +191,14 @@ class ClaudeClient:
         subject_type: str,
         session_name: str,
         reason: str,
-    ) -> tuple[bool, str]:
-        """Returns (approved: bool, explanation: str)."""
+    ) -> tuple[bool, str, int]:
+        """Returns (approved, explanation, duration_minutes).
+
+        duration_minutes is -1 for forever, otherwise number of minutes.
+        """
+        cfg = _load_config()
+        default_minutes = cfg.get("temporary_allow_minutes", 15)
+
         template = self._get_prompt("evaluate_reason", DEFAULT_EVALUATE_REASON)
         prompt = template.format(
             subject=subject,
@@ -192,41 +208,39 @@ class ClaudeClient:
         )
 
         ok, text, err = self._post(prompt)
-        print(f"[Locus] evaluate_reason response ok={ok} text={text[:100]}")
+        print(f"[Locus] evaluate_reason ok={ok} text={text[:120]}")
         if not ok:
-            return False, f"AI evaluator unreachable: {err}"
+            return False, f"AI evaluator unreachable: {err}", default_minutes
 
         approved = False
         explanation = "No explanation."
         for line in text.split("\n"):
             upper = line.upper().strip()
             if upper.startswith("DECISION:"):
-                verdict = upper.replace("DECISION:", "").strip()
-                approved = verdict == "APPROVED"
+                approved = upper.replace("DECISION:", "").strip() == "APPROVED"
             elif line.upper().startswith("REASON:"):
                 explanation = line.split(":", 1)[1].strip() if ":" in line else line.strip()
-        return approved, explanation
+
+        duration = _parse_duration(text, default_minutes) if approved else default_minutes
+        return approved, explanation, duration
 
     def evaluate_title(self, tab_title: str, session_name: str, domain: str = "") -> tuple[bool, str]:
-        """Check if a page title is on-topic for the current session."""
         template = self._get_prompt("evaluate_title", DEFAULT_EVALUATE_TITLE)
         prompt = template.format(
             session_name=session_name,
             domain=domain or "a website",
             tab_title=tab_title,
         )
-
         ok, text, _ = self._post(prompt)
         if not ok:
-            return True, ""  # Fail open
+            return True, ""
 
         relevant = True
         reason = "No explanation."
         for line in text.split("\n"):
             upper = line.upper().strip()
             if upper.startswith("DECISION:"):
-                verdict = upper.replace("DECISION:", "").strip()
-                relevant = verdict == "RELEVANT"
+                relevant = upper.replace("DECISION:", "").strip() == "RELEVANT"
             elif line.upper().startswith("REASON:"):
                 reason = line.split(":", 1)[1].strip() if ":" in line else line.strip()
         return relevant, reason
@@ -237,15 +251,7 @@ class ClaudeClient:
         session_name: str,
         tab_title: str = "",
     ) -> tuple[bool, str]:
-        """Pre-screen: is this site obviously relevant to the session?
-
-        Scrapes the site's meta description for context, then asks the AI
-        using both its own knowledge of the site and the scraped context.
-        Only interrupts the user if there's genuine doubt.
-        """
-        # Scrape the site for context -- runs in ~1-4 seconds, fail-safe
         site_context = _scrape_site_context(domain)
-
         title_hint = f'\nPage tab title: "{tab_title}"' if tab_title else ""
 
         template = self._get_prompt("evaluate_site_relevance", DEFAULT_EVALUATE_SITE_RELEVANCE)
@@ -258,15 +264,14 @@ class ClaudeClient:
 
         ok, text, _ = self._post(prompt)
         if not ok:
-            return False, ""  # Fail closed -- ask the user
+            return False, ""
 
         auto_allow = False
         reason = ""
         for line in text.split("\n"):
             upper = line.upper().strip()
             if upper.startswith("DECISION:"):
-                verdict = upper.replace("DECISION:", "").strip()
-                auto_allow = verdict == "AUTO_ALLOW"
+                auto_allow = upper.replace("DECISION:", "").strip() == "AUTO_ALLOW"
             elif line.upper().startswith("REASON:"):
                 reason = line.split(":", 1)[1].strip() if ":" in line else line.strip()
         return auto_allow, reason
