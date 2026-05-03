@@ -154,43 +154,42 @@ def mono(size: int, medium: bool = False) -> QFont:
 # ── Icon drawing ──────────────────────────────────────────────────────────────
 
 def _lock_pixmap(size: int, locked: bool, color: str) -> QPixmap:
+    """Outline-style lock icon -- no fill, just stroked shackle and body."""
+    # Add padding so the stroke doesn't clip at the edges
+    pad = int(size * 0.08)
     px = QPixmap(size, size)
     px.fill(Qt.GlobalColor.transparent)
     p = QPainter(px)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     c = QColor(color)
+    stroke = max(1.5, size * 0.085)
 
-    # Shackle
-    pen = QPen(c, size * 0.10)
+    pen = QPen(c, stroke)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
-    sw, sh = size * 0.44, size * 0.40
-    sx, sy = (size - sw) / 2, size * 0.06
+
+    # Shackle (arc on top)
+    sw = size * 0.42
+    sh = size * 0.38
+    sx = (size - sw) / 2
+    sy = pad
     if locked:
         p.drawArc(QRectF(sx, sy, sw, sh), 0, 180 * 16)
     else:
-        p.drawArc(QRectF(sx, sy - size*0.06, sw, sh), 20 * 16, 140 * 16)
+        # Open -- arc lifted on right side
+        p.drawArc(QRectF(sx, sy - size * 0.08, sw, sh), 25 * 16, 130 * 16)
 
-    # Body
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QBrush(c))
-    bw, bh = size * 0.65, size * 0.44
-    bx, by = (size - bw) / 2, size * 0.48
+    # Body (rounded rect, outline only)
+    bw = size * 0.64
+    bh = size * 0.42
+    bx = (size - bw) / 2
+    by = size * 0.50
     path = QPainterPath()
     path.addRoundedRect(bx, by, bw, bh, size * 0.09, size * 0.09)
-    p.fillPath(path, QBrush(c))
+    p.drawPath(path)
 
-    # Keyhole
-    kc = QColor(SURFACE)
-    p.setBrush(QBrush(kc))
-    kr = size * 0.075
-    cx2, cy2 = size / 2, by + bh * 0.38
-    p.drawEllipse(QRectF(cx2 - kr, cy2 - kr, kr * 2, kr * 2))
-    p.fillRect(
-        int(cx2 - kr * 0.55), int(cy2 + kr * 0.2),
-        int(kr * 1.1), int(kr * 1.5), kc
-    )
     p.end()
     return px
 
@@ -383,13 +382,19 @@ class StateWatcher(QObject):
 
 # ── Sidebar nav row ───────────────────────────────────────────────────────────
 
+ICON_SIZE = 18
+SIDEBAR_EXPANDED = 200
+SIDEBAR_COLLAPSED = 52
+
+
 class NavRow(QPushButton):
     def __init__(self, label: str, icon_name: str, parent=None):
         super().__init__(parent)
         self._label = label
         self._icon_name = icon_name
         self._selected = False
-        self.setFixedHeight(38)
+        self._collapsed = False
+        self.setFixedHeight(40)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._refresh()
@@ -398,28 +403,39 @@ class NavRow(QPushButton):
         self._selected = v
         self._refresh()
 
+    def set_collapsed(self, v: bool):
+        self._collapsed = v
+        self._refresh()
+
     def _refresh(self):
-        if self._selected:
-            bg = ACCENT_MUTED
-            fg = TEXT
-            fw = "600"
+        bg = ACCENT_MUTED if self._selected else "transparent"
+        fw = "600" if self._selected else "400"
+        if self._collapsed:
+            self.setText("")
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: {bg};
+                    border-radius: 8px;
+                    border: none;
+                    padding: 0;
+                }}
+                QPushButton:hover {{ background: #F0E8D0; }}
+            """)
         else:
-            bg = "transparent"
-            fg = TEXT
-            fw = "400"
-        self.setStyleSheet(f"""
-            QPushButton {{
-                background: {bg};
-                color: {fg};
-                border-radius: 8px;
-                border: none;
-                text-align: left;
-                padding-left: 34px;
-                font-size: 13px;
-                font-weight: {fw};
-            }}
-            QPushButton:hover {{ background: {'#F0E8D0' if not self._selected else ACCENT_MUTED}; }}
-        """)
+            self.setText(self._label)
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: {bg};
+                    color: {TEXT};
+                    border-radius: 8px;
+                    border: none;
+                    text-align: left;
+                    padding-left: {ICON_SIZE + 18}px;
+                    font-size: 13px;
+                    font-weight: {fw};
+                }}
+                QPushButton:hover {{ background: {'#F0E8D0' if not self._selected else ACCENT_MUTED}; }}
+            """)
         self.update()
 
     def paintEvent(self, event):
@@ -427,8 +443,10 @@ class NavRow(QPushButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = ACCENT if self._selected else TEXT_SEC
-        icon_px = _nav_icon(self._icon_name, 15, color)
-        p.drawPixmap(10, (self.height() - 15) // 2, icon_px)
+        icon_px = _nav_icon(self._icon_name, ICON_SIZE, color)
+        x = (self.width() - ICON_SIZE) // 2 if self._collapsed else 10
+        y = (self.height() - ICON_SIZE) // 2
+        p.drawPixmap(x, y, icon_px)
         p.end()
 
 
@@ -445,12 +463,14 @@ PAGES = [
 
 class Sidebar(QWidget):
     page_changed = pyqtSignal(int)
+    collapse_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(200)
+        self._collapsed = False
         self._current = 0
         self._rows = []
+        self.setFixedWidth(SIDEBAR_EXPANDED)
         self._build()
 
     def _build(self):
@@ -458,28 +478,45 @@ class Sidebar(QWidget):
         layout.setContentsMargins(10, 0, 8, 16)
         layout.setSpacing(0)
 
-        # Header
+        # Header row -- lock icon + Locus title + collapse button
         hdr = QWidget()
         hdr.setFixedHeight(62)
         hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(8, 0, 0, 0)
+        hl.setContentsMargins(8, 0, 4, 0)
         hl.setSpacing(8)
 
-        lock_lbl = QLabel()
-        lock_lbl.setPixmap(_lock_pixmap(20, True, ACCENT))
-        lock_lbl.setFixedSize(20, 20)
-        hl.addWidget(lock_lbl)
+        self._lock_lbl = QLabel()
+        self._lock_lbl.setPixmap(_lock_pixmap(22, True, ACCENT))
+        self._lock_lbl.setFixedSize(22, 22)
+        hl.addWidget(self._lock_lbl)
 
-        title = QLabel("Locus")
-        title.setFont(serif(20))
-        title.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        hl.addWidget(title)
+        self._title_lbl = QLabel("Locus")
+        self._title_lbl.setFont(serif(20))
+        self._title_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
+        hl.addWidget(self._title_lbl)
         hl.addStretch()
+
+        # Collapse toggle button
+        self._toggle_btn = QPushButton("‹")
+        self._toggle_btn.setFixedSize(24, 24)
+        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {TEXT_SEC};
+                border: none;
+                font-size: 16px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{ background: {CARD}; }}
+        """)
+        self._toggle_btn.clicked.connect(self.toggle_collapse)
+        hl.addWidget(self._toggle_btn)
         layout.addWidget(hdr)
 
         for label, icon_name, idx in PAGES:
             row = NavRow(label, icon_name)
-            row.clicked.connect(lambda _, i=idx, l=label, ic=icon_name: self._select(i, l, ic))
+            row.clicked.connect(lambda _, i=idx: self._select(i))
             self._rows.append(row)
             layout.addWidget(row)
             layout.addSpacing(2)
@@ -487,7 +524,21 @@ class Sidebar(QWidget):
         layout.addStretch()
         self._rows[0].set_selected(True)
 
-    def _select(self, idx: int, label: str, icon_name: str):
+    def toggle_collapse(self):
+        self._collapsed = not self._collapsed
+        if self._collapsed:
+            self.setFixedWidth(SIDEBAR_COLLAPSED)
+            self._title_lbl.hide()
+            self._toggle_btn.setText("›")
+        else:
+            self.setFixedWidth(SIDEBAR_EXPANDED)
+            self._title_lbl.show()
+            self._toggle_btn.setText("‹")
+        for row in self._rows:
+            row.set_collapsed(self._collapsed)
+        self.collapse_toggled.emit(self._collapsed)
+
+    def _select(self, idx: int):
         for row in self._rows:
             row.set_selected(False)
         self._rows[idx].set_selected(True)
@@ -592,25 +643,27 @@ class LauncherPane(QWidget):
         self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_lbl.setStyleSheet(f"color: {TEXT_SEC}; background: transparent; font-size: 14px;")
         layout.addWidget(self._status_lbl)
-        layout.addSpacing(28)
+        layout.addSpacing(32)
 
-        # Session input area
+        # Session input area -- left aligned, max width, centered in column
         input_area = QWidget()
-        input_area.setMaximumWidth(440)
+        input_area.setMaximumWidth(480)
         input_layout = QVBoxLayout(input_area)
         input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(8)
+        input_layout.setSpacing(6)
 
         wao_lbl = QLabel("WHAT ARE YOU WORKING ON?")
         wao_lbl.setFont(mono(10, medium=True))
+        wao_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft)
         wao_lbl.setStyleSheet(f"color: {TEXT_SEC}; background: transparent; letter-spacing: 1.2px;")
         input_layout.addWidget(wao_lbl)
 
         self._custom_input = QLineEdit()
         self._custom_input.setPlaceholderText("e.g. Write essay intro")
+        self._custom_input.setFixedHeight(40)
         self._custom_input.returnPressed.connect(self._start_custom)
         input_layout.addWidget(self._custom_input)
-        input_layout.addSpacing(4)
+        input_layout.addSpacing(2)
 
         self._start_btn = QPushButton("  Start Session")
         self._start_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
@@ -631,7 +684,6 @@ class LauncherPane(QWidget):
             QPushButton:pressed {{ background: #BF811A; }}
         """)
         self._start_btn.clicked.connect(self._start_custom)
-        # Draw play icon on button
         self._start_btn.setIcon(QIcon(_nav_icon("start", 14, "#1A1100")))
         self._start_btn.setIconSize(QSize(14, 14))
         input_layout.addWidget(self._start_btn)
@@ -657,7 +709,7 @@ class LauncherPane(QWidget):
 
         center_wrap = QHBoxLayout()
         center_wrap.addStretch()
-        center_wrap.addWidget(input_area)
+        center_wrap.addWidget(input_area, 1)
         center_wrap.addStretch()
         layout.addLayout(center_wrap)
         layout.addSpacing(24)
@@ -704,25 +756,28 @@ class LauncherPane(QWidget):
 
     def _update_icon(self):
         color = "#E53935" if self._session_active else ACCENT
-        bg = "rgba(229,57,53,0.08)" if self._session_active else ACCENT_MUTED
+        circle_bg = "#FFEBEE" if self._session_active else ACCENT_MUTED
 
-        px = QPixmap(96, 96)
-        px.fill(Qt.GlobalColor.transparent)
-        p = QPainter(px)
+        size = 96
+        lock_size = 44  # lock drawn inside circle with breathing room
+
+        final = QPixmap(size, size)
+        final.fill(Qt.GlobalColor.transparent)
+        p = QPainter(final)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Circle background
         path = QPainterPath()
-        path.addEllipse(QRectF(0, 0, 96, 96))
-        p.fillPath(path, QBrush(QColor(ACCENT_MUTED if not self._session_active else "#FFEBEE")))
+        path.addEllipse(QRectF(0, 0, size, size))
+        p.fillPath(path, QBrush(QColor(circle_bg)))
+
+        # Lock centered inside circle
+        lock_px = _lock_pixmap(lock_size, self._session_active, color)
+        lx = (size - lock_size) // 2
+        ly = (size - lock_size) // 2
+        p.drawPixmap(lx, ly, lock_px)
         p.end()
 
-        # Composite lock on top of circle
-        lock_px = _lock_pixmap(48, self._session_active, color)
-        final = QPixmap(96, 96)
-        final.fill(Qt.GlobalColor.transparent)
-        p2 = QPainter(final)
-        p2.drawPixmap(0, 0, px)
-        p2.drawPixmap(24, 24, lock_px)
-        p2.end()
         self._icon_circle.setPixmap(final)
 
     def _populate_events(self):
