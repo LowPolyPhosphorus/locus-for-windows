@@ -372,10 +372,7 @@ class FocusLockApp:
 
         if approved:
             self.app_blocker.allow_temporarily(app_name, minutes=mins)
-            # Don't try to relaunch subprocess-only processes like steamwebhelper
-            _no_launch = {"steamwebhelper", "steamservice"}
-            if app_name.lower() not in _no_launch:
-                self.app_blocker.open_app(app_name)
+            self.app_blocker.open_app(app_name)
             try:
                 log_event("app_allowed", app_name=app_name, reason="ai_approved",
                           session_name=session_name)
@@ -598,24 +595,36 @@ def _release_lock():
 
 def main():
     _acquire_single_instance_lock()
-    app = FocusLockApp()  # noqa: F841 — worker threads run on it
-    stop = threading.Event()
+    app = FocusLockApp()  # noqa: F841 -- worker threads run on it
 
-    # SIGINT works on Windows; SIGTERM does not always, so we catch both
-    # but don't crash if SIGTERM registration fails.
-    def _handle_sig(*_):
-        stop.set()
+    # Signal handlers can only be registered on the main thread.
+    # When running as a background thread inside tray_app.py we skip them --
+    # the tray app handles shutdown by just exiting the process.
+    import threading as _threading
+    if _threading.current_thread() is _threading.main_thread():
+        stop = _threading.Event()
 
-    signal.signal(signal.SIGINT, _handle_sig)
-    try:
-        signal.signal(signal.SIGTERM, _handle_sig)
-    except (OSError, ValueError):
-        pass  # SIGTERM not supported on this platform
+        def _handle_sig(*_):
+            stop.set()
 
-    try:
-        stop.wait()
-    finally:
-        _release_lock()
+        signal.signal(signal.SIGINT, _handle_sig)
+        try:
+            signal.signal(signal.SIGTERM, _handle_sig)
+        except (OSError, ValueError):
+            pass
+
+        try:
+            stop.wait()
+        finally:
+            _release_lock()
+    else:
+        # Running as a daemon thread -- just block forever.
+        # The process exits when the tray UI quits.
+        try:
+            while True:
+                time.sleep(60)
+        finally:
+            _release_lock()
 
 
 if __name__ == "__main__":
