@@ -30,6 +30,10 @@ BROWSER_REGISTRY = [
     {
         "name": "Vivaldi",
         "keys": [
+            # Per-user install -- this is where Vivaldi actually lives on most machines
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Classes\Vivaldi\shell\open\command"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\Vivaldi\shell\open\command"),
+            # System-wide install
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Vivaldi\shell\open\command"),
             (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Vivaldi\shell\open\command"),
         ],
@@ -38,6 +42,8 @@ BROWSER_REGISTRY = [
     {
         "name": "Google Chrome",
         "keys": [
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Classes\ChromeHTML\shell\open\command"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\ChromeHTML\shell\open\command"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Google Chrome\shell\open\command"),
             (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Google Chrome\shell\open\command"),
         ],
@@ -46,6 +52,8 @@ BROWSER_REGISTRY = [
     {
         "name": "Microsoft Edge",
         "keys": [
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Classes\MSEdgeHTM\shell\open\command"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\MSEdgeHTM\shell\open\command"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Microsoft Edge\shell\open\command"),
             (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Microsoft Edge\shell\open\command"),
         ],
@@ -54,6 +62,8 @@ BROWSER_REGISTRY = [
     {
         "name": "Brave",
         "keys": [
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Classes\BraveHTML\shell\open\command"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\BraveHTML\shell\open\command"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Brave\shell\open\command"),
             (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Brave\shell\open\command"),
         ],
