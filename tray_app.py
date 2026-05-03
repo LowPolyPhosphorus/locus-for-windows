@@ -13,323 +13,271 @@ import os
 import sys
 import threading
 import time
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog,
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QListWidget, QListWidgetItem, QScrollArea, QFrame, QSizePolicy,
-    QStackedWidget, QGraphicsOpacityEffect,
+    QStackedWidget,
 )
 from PyQt6.QtGui import (
     QIcon, QPixmap, QColor, QPainter, QPainterPath, QFont,
-    QFontDatabase, QPen, QBrush, QPalette,
+    QFontDatabase, QPen, QBrush,
 )
 from PyQt6.QtCore import (
-    Qt, QTimer, pyqtSignal, QObject, QThread, QPropertyAnimation,
-    QEasingCurve, QSize, QPoint, QRect,
+    Qt, QTimer, pyqtSignal, QObject, QThread, QSize, QRectF, QPointF,
 )
 
 from focuslock.paths import STATE_PATH, COMMAND_PATH, CONFIG_PATH
 
 
-# ── Theme ─────────────────────────────────────────────────────────────────────
+# ── Theme (light only) ────────────────────────────────────────────────────────
 
-class Theme:
-    # Light palette
-    ACCENT       = "#E8A020"
-    ACCENT_MUTED = "#FDF3E0"
-    SURFACE      = "#FDFAF5"
-    CARD         = "#F7F2E8"
-    BORDER       = "#E8DFC8"
-    TEXT         = "#1A1409"
-    TEXT_SECONDARY = "#7A6A4A"
+ACCENT        = "#E8A020"
+ACCENT_HOVER  = "#D4901A"
+ACCENT_MUTED  = "#FDF3E0"
+SURFACE       = "#FDFAF5"
+CARD          = "#F7F2E8"
+BORDER        = "#E8DFC8"
+TEXT          = "#1A1409"
+TEXT_SEC      = "#7A6A4A"
+TEXT_LIGHT    = "#B0A080"
 
-    # Dark palette -- matches Swift dark variants
-    SURFACE_DARK = "#14100A"
-    CARD_DARK    = "#1E1608"
-    BORDER_DARK  = "#FFFFFF18"
-    TEXT_DARK    = "#F0E6CC"
-    TEXT_SECONDARY_DARK = "#8A7A5A"
+# Tag colors matching the Swift app
+TAG_COLORS = {
+    "pre-ap":   ("#7C3AED", "#EDE9FE"),
+    "ap":       ("#7C3AED", "#EDE9FE"),
+    "biology":  ("#059669", "#D1FAE5"),
+    "math":     ("#2563EB", "#DBEAFE"),
+    "english":  ("#DC2626", "#FEE2E2"),
+    "history":  ("#D97706", "#FEF3C7"),
+    "spanish":  ("#DB2777", "#FCE7F3"),
+    "science":  ("#059669", "#D1FAE5"),
+    "csp":      ("#2563EB", "#DBEAFE"),
+    "physics":  ("#7C3AED", "#EDE9FE"),
+    "chem":     ("#059669", "#D1FAE5"),
+    "default":  ("#6B7280", "#F3F4F6"),
+}
 
-    _dark = False
-
-    @classmethod
-    def set_dark(cls, dark: bool):
-        cls._dark = dark
-
-    @classmethod
-    def surface(cls): return cls.SURFACE_DARK if cls._dark else cls.SURFACE
-    @classmethod
-    def card(cls): return cls.CARD_DARK if cls._dark else cls.CARD
-    @classmethod
-    def border(cls): return cls.BORDER_DARK if cls._dark else cls.BORDER
-    @classmethod
-    def text(cls): return cls.TEXT_DARK if cls._dark else cls.TEXT
-    @classmethod
-    def text_secondary(cls): return cls.TEXT_SECONDARY_DARK if cls._dark else cls.TEXT_SECONDARY
-
-    @classmethod
-    def stylesheet(cls) -> str:
-        s = cls.surface()
-        c = cls.card()
-        b = cls.border()
-        t = cls.text()
-        ts = cls.text_secondary()
-        return f"""
-        QWidget {{
-            background-color: {s};
-            color: {t};
-            font-family: 'Segoe UI', sans-serif;
-            font-size: 13px;
-            border: none;
-            outline: none;
-        }}
-        QLabel {{ background: transparent; color: {t}; }}
-        QLabel#secondary {{ color: {ts}; font-size: 12px; }}
-        QLabel#section_label {{
-            color: {ts};
-            font-size: 10px;
-            font-weight: 600;
-            letter-spacing: 1.2px;
-        }}
-        QLineEdit {{
-            background: {c};
-            border: 1px solid {b};
-            border-radius: 8px;
-            padding: 8px 12px;
-            color: {t};
-            font-size: 13px;
-        }}
-        QLineEdit:focus {{ border-color: {cls.ACCENT}; }}
-        QPushButton#primary {{
-            background: {cls.ACCENT};
-            color: #1A1409 !important;
-            font-weight: 600;
-            font-size: 13px;
-            border-radius: 8px;
-            padding: 8px 20px;
-            border: none;
-        }}
-        QPushButton#primary:hover {{ background: #D4911C; color: #1A1409; }}
-        QPushButton#primary:pressed {{ background: #C07F10; color: #1A1409; }}
-        QPushButton#secondary_btn {{
-            background: transparent;
-            color: {t};
-            font-size: 13px;
-            border: 1px solid {b};
-            border-radius: 8px;
-            padding: 8px 16px;
-        }}
-        QPushButton#secondary_btn:hover {{ border-color: {cls.ACCENT}; color: {cls.ACCENT}; }}
-        QPushButton#ghost {{
-            background: transparent;
-            color: {ts};
-            font-size: 12px;
-            border: none;
-            padding: 4px 8px;
-        }}
-        QPushButton#ghost:hover {{ color: {t}; }}
-        QListWidget {{
-            background: transparent;
-            border: none;
-            outline: none;
-        }}
-        QListWidget::item {{
-            background: {c};
-            border: 1px solid {b};
-            border-radius: 8px;
-            padding: 10px 14px;
-            margin-bottom: 4px;
-            color: {t};
-        }}
-        QListWidget::item:selected {{
-            background: {cls.ACCENT_MUTED};
-            border-color: {cls.ACCENT};
-            color: {cls.TEXT};
-        }}
-        QListWidget::item:hover:!selected {{
-            border-color: {cls.ACCENT};
-        }}
-        QScrollBar:vertical {{
-            background: transparent;
-            width: 6px;
-            margin: 0;
-        }}
-        QScrollBar::handle:vertical {{
-            background: {b};
-            border-radius: 3px;
-            min-height: 20px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-        QScrollArea {{ border: none; background: transparent; }}
-        QMenu {{
-            background: {s};
-            border: 1px solid {b};
-            border-radius: 10px;
-            padding: 6px;
-        }}
-        QMenu::item {{
-            padding: 7px 16px;
-            border-radius: 6px;
-            color: {t};
-        }}
-        QMenu::item:selected {{ background: {cls.ACCENT_MUTED}; color: {cls.TEXT}; }}
-        QMenu::separator {{ background: {b}; height: 1px; margin: 4px 10px; }}
-        """
+def _tag_colors(class_name: str):
+    key = class_name.lower().strip()
+    for k, v in TAG_COLORS.items():
+        if k in key:
+            return v
+    return TAG_COLORS["default"]
 
 
-def _is_system_dark() -> bool:
-    try:
-        import winreg
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-        ) as k:
-            val, _ = winreg.QueryValueEx(k, "AppsUseLightTheme")
-            return val == 0
-    except Exception:
-        return False
+STYLESHEET = f"""
+QWidget {{
+    background-color: {SURFACE};
+    color: {TEXT};
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 13px;
+    border: none;
+    outline: none;
+}}
+QLabel {{ background: transparent; color: {TEXT}; }}
+QLineEdit {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: {TEXT};
+    font-size: 13px;
+}}
+QLineEdit:focus {{ border-color: {ACCENT}; }}
+QScrollArea, QScrollArea > QWidget > QWidget {{ background: {SURFACE}; border: none; }}
+QScrollBar:vertical {{
+    background: transparent; width: 5px; margin: 0;
+}}
+QScrollBar::handle:vertical {{
+    background: {BORDER}; border-radius: 2px; min-height: 20px;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QListWidget {{ background: transparent; border: none; outline: none; }}
+QListWidget::item {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 5px;
+    color: {TEXT};
+}}
+QListWidget::item:selected {{
+    background: {ACCENT_MUTED};
+    border-color: {ACCENT};
+    color: {TEXT};
+}}
+QListWidget::item:hover:!selected {{ border-color: {ACCENT}; }}
+QMenu {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    padding: 6px;
+}}
+QMenu::item {{ padding: 7px 16px; border-radius: 6px; color: {TEXT}; }}
+QMenu::item:selected {{ background: {ACCENT_MUTED}; color: {TEXT}; }}
+QMenu::separator {{ background: {BORDER}; height: 1px; margin: 4px 10px; }}
+"""
 
 
-# ── Font loading ──────────────────────────────────────────────────────────────
+# ── Font helpers ──────────────────────────────────────────────────────────────
 
 def _load_fonts():
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "FocusLockApp", "Fonts")
-    for fname in [
-        "InstrumentSerif-Regular.ttf",
-        "InstrumentSerif-Italic.ttf",
-        "DMMono-Regular.ttf",
-        "DMMono-Medium.ttf",
-    ]:
+    for fname in ["InstrumentSerif-Regular.ttf", "InstrumentSerif-Italic.ttf",
+                  "DMMono-Regular.ttf", "DMMono-Medium.ttf"]:
         path = os.path.join(base, fname)
         if os.path.exists(path):
             QFontDatabase.addApplicationFont(path)
 
 
-def serif_font(size: int, italic: bool = False) -> QFont:
+def serif(size: int) -> QFont:
     f = QFont("Instrument Serif")
     if not f.exactMatch():
         f = QFont("Georgia")
     f.setPointSize(size)
-    f.setItalic(italic)
     return f
 
 
-def mono_font(size: int, medium: bool = False) -> QFont:
+def mono(size: int, medium: bool = False) -> QFont:
     f = QFont("DM Mono")
     if not f.exactMatch():
         f = QFont("Consolas")
     f.setPointSize(size)
-    f.setWeight(QFont.Weight.Medium if medium else QFont.Weight.Normal)
+    if medium:
+        f.setWeight(QFont.Weight.Medium)
     return f
 
 
 # ── Icon drawing ──────────────────────────────────────────────────────────────
 
-def _draw_lock_icon(size: int, locked: bool, color: str) -> QPixmap:
+def _lock_pixmap(size: int, locked: bool, color: str) -> QPixmap:
     px = QPixmap(size, size)
     px.fill(Qt.GlobalColor.transparent)
     p = QPainter(px)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
     c = QColor(color)
-    p.setPen(QPen(c, size * 0.09, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+
+    # Shackle
+    pen = QPen(c, size * 0.10)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
+    sw, sh = size * 0.44, size * 0.40
+    sx, sy = (size - sw) / 2, size * 0.06
+    if locked:
+        p.drawArc(QRectF(sx, sy, sw, sh), 0, 180 * 16)
+    else:
+        p.drawArc(QRectF(sx, sy - size*0.06, sw, sh), 20 * 16, 140 * 16)
 
-    # Shackle (arc on top)
-    sw = size * 0.42
-    sh = size * 0.38
-    sx = (size - sw) / 2
-    sy = size * 0.08 if locked else size * 0.02
-    from PyQt6.QtCore import QRectF
-    p.drawArc(QRectF(sx, sy, sw, sh), 0 * 16, 180 * 16)
-
-    # Body (rounded rect bottom half)
-    bw = size * 0.62
-    bh = size * 0.42
-    bx = (size - bw) / 2
-    by = size * 0.46
-    p.setBrush(QBrush(c))
+    # Body
     p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(c))
+    bw, bh = size * 0.65, size * 0.44
+    bx, by = (size - bw) / 2, size * 0.48
     path = QPainterPath()
-    path.addRoundedRect(bx, by, bw, bh, size * 0.08, size * 0.08)
+    path.addRoundedRect(bx, by, bw, bh, size * 0.09, size * 0.09)
     p.fillPath(path, QBrush(c))
 
     # Keyhole
-    kc = QColor(Theme.surface())
+    kc = QColor(SURFACE)
     p.setBrush(QBrush(kc))
-    kr = size * 0.07
-    p.drawEllipse(QRectF(size/2 - kr, by + bh*0.28 - kr, kr*2, kr*2))
-    p.fillRect(QRect(int(size/2 - kr*0.6), int(by + bh*0.28 + kr*0.3), int(kr*1.2), int(kr*1.4)), kc)
-
+    kr = size * 0.075
+    cx2, cy2 = size / 2, by + bh * 0.38
+    p.drawEllipse(QRectF(cx2 - kr, cy2 - kr, kr * 2, kr * 2))
+    p.fillRect(
+        int(cx2 - kr * 0.55), int(cy2 + kr * 0.2),
+        int(kr * 1.1), int(kr * 1.5), kc
+    )
     p.end()
     return px
 
 
-def _draw_tray_icon(active: bool) -> QIcon:
+def _tray_pixmap(active: bool) -> QIcon:
+    px = QPixmap(32, 32)
+    px.fill(Qt.GlobalColor.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
     color = "#E53935" if active else "#7A6A4A"
-    px = _draw_lock_icon(32, active, color)
+    p.setBrush(QBrush(QColor(color)))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(2, 2, 28, 28)
+    p.end()
     return QIcon(px)
 
 
-def _draw_nav_icon(name: str, size: int, color: str) -> QPixmap:
+def _nav_icon(name: str, size: int, color: str) -> QPixmap:
     px = QPixmap(size, size)
     px.fill(Qt.GlobalColor.transparent)
     p = QPainter(px)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     c = QColor(color)
-    pen = QPen(c, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+    pen = QPen(c, 1.6, Qt.PenStyle.SolidLine,
+               Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
+    m = size * 0.14
 
-    m = size * 0.15
-    w = size - m * 2
-    h = size - m * 2
-
-    from PyQt6.QtCore import QRectF, QPointF
+    import math
 
     if name == "start":
-        # Play triangle
-        path = QPainterPath()
-        path.moveTo(m + w*0.2, m + h*0.1)
-        path.lineTo(m + w*0.2, m + h*0.9)
-        path.lineTo(m + w*0.9, m + h*0.5)
-        path.closeSubpath()
         p.setBrush(QBrush(c))
         p.setPen(Qt.PenStyle.NoPen)
+        path = QPainterPath()
+        path.moveTo(m + size*0.12, m)
+        path.lineTo(m + size*0.12, size - m)
+        path.lineTo(size - m, size / 2)
+        path.closeSubpath()
         p.drawPath(path)
 
-    elif name == "settings":
-        # Gear circle + dots
-        p.drawEllipse(QRectF(m + w*0.25, m + h*0.25, w*0.5, h*0.5))
-        for i in range(6):
-            import math
-            angle = i * 60 * math.pi / 180
-            ox = size/2 + math.cos(angle) * w*0.42
-            oy = size/2 + math.sin(angle) * h*0.42
-            p.setBrush(QBrush(c))
-            p.drawEllipse(QRectF(ox - 1.5, oy - 1.5, 3, 3))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-
     elif name == "connectors":
-        # Three horizontal lines with dots (bolt/connections)
-        for i, y_frac in enumerate([0.25, 0.5, 0.75]):
-            y = m + h * y_frac
-            p.drawLine(QPoint(int(m + w*0.1), int(y)), QPoint(int(m + w*0.9), int(y)))
+        # Two nodes connected by a line -- plug/connection icon
+        r = size * 0.13
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QRectF(m, size/2 - r, r*2, r*2))
+        p.drawEllipse(QRectF(size - m - r*2, size/2 - r, r*2, r*2))
+        p.setPen(pen)
+        p.drawLine(QPointF(m + r*2, size/2), QPointF(size - m - r*2, size/2))
+        # tick marks
+        for xf in [0.35, 0.5, 0.65]:
+            x = size * xf
+            p.drawLine(QPointF(x, size/2 - size*0.15), QPointF(x, size/2 + size*0.15))
 
     elif name == "analytics":
-        # Simple bar chart
-        bars = [0.4, 0.7, 0.55, 0.9]
-        bw = w / (len(bars) * 2 - 1)
+        bars = [0.45, 0.75, 0.55, 0.9]
+        bw = (size - m*2) / (len(bars) * 2 - 1)
         p.setBrush(QBrush(c))
         p.setPen(Qt.PenStyle.NoPen)
         for i, frac in enumerate(bars):
             bx = m + i * bw * 2
-            bh2 = h * frac
-            by = m + h - bh2
+            bh2 = (size - m*2) * frac
+            by = size - m - bh2
             path = QPainterPath()
             path.addRoundedRect(bx, by, bw, bh2, 1.5, 1.5)
             p.drawPath(path)
+
+    elif name == "settings":
+        # Gear
+        outer_r = size * 0.36
+        inner_r = size * 0.22
+        teeth = 8
+        cx2, cy2 = size / 2, size / 2
+        p.setBrush(QBrush(c))
+        p.setPen(Qt.PenStyle.NoPen)
+        gear = QPainterPath()
+        for i in range(teeth * 2):
+            angle = i * math.pi / teeth
+            r = outer_r if i % 2 == 0 else outer_r * 0.78
+            gear.lineTo(cx2 + math.cos(angle) * r, cy2 + math.sin(angle) * r)
+        gear.closeSubpath()
+        p.drawPath(gear)
+        # Center hole
+        hole = QPainterPath()
+        hole.addEllipse(QRectF(cx2 - inner_r, cy2 - inner_r, inner_r*2, inner_r*2))
+        p.setBrush(QBrush(QColor(SURFACE)))
+        p.drawPath(hole)
 
     p.end()
     return px
@@ -353,7 +301,7 @@ def _send_command(cmd_type: str, data: dict = None):
             json.dump(cmd, f)
         os.replace(tmp, COMMAND_PATH)
     except Exception as e:
-        print(f"[Locus UI] Failed to write command: {e}")
+        print(f"[Locus UI] Command error: {e}")
 
 
 # ── Dialog queue drainer ──────────────────────────────────────────────────────
@@ -368,7 +316,7 @@ def _drain_dialog_queue():
         pass
 
 
-# ── Daemon thread launcher ────────────────────────────────────────────────────
+# ── Daemon launcher ───────────────────────────────────────────────────────────
 
 def _start_daemon_thread():
     from focuslock.app import main as daemon_main
@@ -381,9 +329,7 @@ def _start_daemon_thread():
         except Exception as e:
             print(f"[Locus] Daemon crashed: {e}")
 
-    t = threading.Thread(target=_run, daemon=True, name="locusd")
-    t.start()
-    return t
+    threading.Thread(target=_run, daemon=True, name="locusd").start()
 
 
 # ── Browser debug setup ───────────────────────────────────────────────────────
@@ -391,8 +337,7 @@ def _start_daemon_thread():
 def _browser_debug_is_active() -> bool:
     try:
         import requests
-        resp = requests.get("http://localhost:9222/json/version", timeout=1)
-        return resp.status_code == 200
+        return requests.get("http://localhost:9222/json/version", timeout=1).status_code == 200
     except Exception:
         return False
 
@@ -400,19 +345,18 @@ def _browser_debug_is_active() -> bool:
 def _setup_browser_debug_if_needed():
     if _browser_debug_is_active():
         return
-    import ctypes
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setup_browser_debug.py")
     if not os.path.exists(script):
         return
+    import ctypes
     threading.Thread(
         target=lambda: ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, f'"{script}"', None, 1
-        ),
+            None, "runas", sys.executable, f'"{script}"', None, 1),
         daemon=True,
     ).start()
 
 
-# ── Background state watcher ──────────────────────────────────────────────────
+# ── State watcher ─────────────────────────────────────────────────────────────
 
 class StateWatcher(QObject):
     state_changed = pyqtSignal(dict)
@@ -437,147 +381,167 @@ class StateWatcher(QObject):
         self._running = False
 
 
-# ── Sidebar nav item ──────────────────────────────────────────────────────────
+# ── Sidebar nav row ───────────────────────────────────────────────────────────
 
-class NavItem(QPushButton):
+class NavRow(QPushButton):
     def __init__(self, label: str, icon_name: str, parent=None):
         super().__init__(parent)
         self._label = label
         self._icon_name = icon_name
         self._selected = False
-        self.setFixedHeight(40)
+        self.setFixedHeight(38)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setCheckable(False)
-        self._update_style()
+        self._refresh()
 
-    def set_selected(self, selected: bool):
-        self._selected = selected
-        self._update_style()
-        self.update()
+    def set_selected(self, v: bool):
+        self._selected = v
+        self._refresh()
 
-    def _update_style(self):
+    def _refresh(self):
         if self._selected:
-            bg = Theme.ACCENT_MUTED
-            tc = "#1A1409"  # always dark on the muted gold background
+            bg = ACCENT_MUTED
+            fg = TEXT
+            fw = "600"
         else:
             bg = "transparent"
-            tc = Theme.text()
+            fg = TEXT
+            fw = "400"
         self.setStyleSheet(f"""
             QPushButton {{
                 background: {bg};
-                color: {tc};
+                color: {fg};
                 border-radius: 8px;
-                text-align: left;
-                padding-left: 36px;
-                font-size: 13px;
-                font-weight: {'600' if self._selected else '400'};
                 border: none;
+                text-align: left;
+                padding-left: 34px;
+                font-size: 13px;
+                font-weight: {fw};
             }}
-            QPushButton:hover {{
-                background: {'rgba(232,160,32,0.15)' if Theme._dark else '#F0E8D0'};
-                color: {tc};
-            }}
+            QPushButton:hover {{ background: {'#F0E8D0' if not self._selected else ACCENT_MUTED}; }}
         """)
+        self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        color = Theme.ACCENT if self._selected else Theme.text_secondary()
-        icon_px = _draw_nav_icon(self._icon_name, 16, color)
-        p.drawPixmap(10, (self.height() - 16) // 2, icon_px)
+        color = ACCENT if self._selected else TEXT_SEC
+        icon_px = _nav_icon(self._icon_name, 15, color)
+        p.drawPixmap(10, (self.height() - 15) // 2, icon_px)
         p.end()
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
+# Order matches the screenshot: Start, Connectors, Analytics, Settings
+PAGES = [
+    ("Start",      "start",      0),
+    ("Connectors", "connectors", 1),
+    ("Analytics",  "analytics",  2),
+    ("Settings",   "settings",   3),
+]
+
+
 class Sidebar(QWidget):
     page_changed = pyqtSignal(int)
 
-    PAGES = [
-        ("Start",      "start"),
-        ("Settings",   "settings"),
-        ("Connectors", "connectors"),
-        ("Analytics",  "analytics"),
-    ]
-
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(220)
+        self.setFixedWidth(200)
         self._current = 0
-        self._nav_items = []
+        self._rows = []
         self._build()
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 16)
+        layout.setContentsMargins(10, 0, 8, 16)
         layout.setSpacing(0)
 
         # Header
-        header = QWidget()
-        header.setFixedHeight(64)
-        hl = QHBoxLayout(header)
+        hdr = QWidget()
+        hdr.setFixedHeight(62)
+        hl = QHBoxLayout(hdr)
         hl.setContentsMargins(8, 0, 0, 0)
-        hl.setSpacing(10)
+        hl.setSpacing(8)
 
-        lock_px = _draw_lock_icon(22, True, Theme.ACCENT)
         lock_lbl = QLabel()
-        lock_lbl.setPixmap(lock_px)
-        lock_lbl.setFixedSize(22, 22)
+        lock_lbl.setPixmap(_lock_pixmap(20, True, ACCENT))
+        lock_lbl.setFixedSize(20, 20)
+        hl.addWidget(lock_lbl)
 
         title = QLabel("Locus")
-        title.setFont(serif_font(22))
-        title.setStyleSheet(f"color: {Theme.text()}; background: transparent;")
-
-        hl.addWidget(lock_lbl)
+        title.setFont(serif(20))
+        title.setStyleSheet(f"color: {TEXT}; background: transparent;")
         hl.addWidget(title)
         hl.addStretch()
-        layout.addWidget(header)
+        layout.addWidget(hdr)
 
-        # Nav items
-        for i, (label, icon_name) in enumerate(self.PAGES):
-            item = NavItem(label, icon_name)
-            item.clicked.connect(lambda checked, idx=i: self._select(idx))
-            self._nav_items.append(item)
-            layout.addWidget(item)
+        for label, icon_name, idx in PAGES:
+            row = NavRow(label, icon_name)
+            row.clicked.connect(lambda _, i=idx, l=label, ic=icon_name: self._select(i, l, ic))
+            self._rows.append(row)
+            layout.addWidget(row)
+            layout.addSpacing(2)
 
         layout.addStretch()
+        self._rows[0].set_selected(True)
 
-        self._nav_items[0].set_selected(True)
-
-    def _select(self, idx: int):
-        self._nav_items[self._current].set_selected(False)
+    def _select(self, idx: int, label: str, icon_name: str):
+        for row in self._rows:
+            row.set_selected(False)
+        self._rows[idx].set_selected(True)
         self._current = idx
-        self._nav_items[idx].set_selected(True)
         self.page_changed.emit(idx)
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(Theme.surface()))
-        # Right border line
-        p.setPen(QPen(QColor(Theme.border()), 1))
+        p.fillRect(self.rect(), QColor(SURFACE))
+        p.setPen(QPen(QColor(BORDER), 1))
         p.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
         p.end()
 
 
-# ── Card widget ───────────────────────────────────────────────────────────────
+# ── Event item widget (with colored class tag) ────────────────────────────────
 
-class Card(QFrame):
-    def __init__(self, parent=None):
+class EventItem(QWidget):
+    def __init__(self, ev: dict, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._ev = ev
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(0, 0, self.width(), self.height(), 12, 12)
-        p.fillPath(path, QColor(Theme.card()))
-        pen = QPen(QColor(Theme.border()), 1)
-        p.setPen(pen)
-        p.drawPath(path)
-        p.end()
+        title = QLabel(ev.get("title", "?"))
+        title.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 500; background: transparent;")
+        layout.addWidget(title)
+
+        bottom = QHBoxLayout()
+        bottom.setSpacing(6)
+        bottom.setContentsMargins(0, 0, 0, 0)
+
+        class_name = ev.get("class_name", "")
+        if class_name:
+            fg, bg = _tag_colors(class_name)
+            tag = QLabel(class_name.upper())
+            tag.setStyleSheet(f"""
+                color: {fg};
+                background: {bg};
+                border-radius: 4px;
+                padding: 1px 6px;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+            """)
+            bottom.addWidget(tag)
+
+        if ev.get("start_time"):
+            time_lbl = QLabel(ev["start_time"])
+            time_lbl.setStyleSheet(f"color: {TEXT_SEC}; font-size: 11px; background: transparent;")
+            bottom.addWidget(time_lbl)
+
+        bottom.addStretch()
+        layout.addLayout(bottom)
 
 
 # ── Launcher pane ─────────────────────────────────────────────────────────────
@@ -587,156 +551,322 @@ class LauncherPane(QWidget):
         super().__init__(parent)
         self._events = []
         self._session_active = False
-        self._session_name = ""
+        self._session_info = None
         self._build()
 
     def _build(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(28, 28, 28, 28)
-        outer.setSpacing(20)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # Hero card
-        hero = Card()
-        hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(24, 24, 24, 24)
-        hero_layout.setSpacing(8)
-        hero_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {SURFACE};")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
-        self._lock_label = QLabel()
-        self._lock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lock_label.setFixedSize(64, 64)
-        self._update_lock_icon()
-        hero_layout.addWidget(self._lock_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Lock icon circle
+        self._icon_circle = QLabel()
+        self._icon_circle.setFixedSize(96, 96)
+        self._icon_circle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._update_icon()
+        icon_row = QHBoxLayout()
+        icon_row.addStretch()
+        icon_row.addWidget(self._icon_circle)
+        icon_row.addStretch()
+        layout.addLayout(icon_row)
+        layout.addSpacing(14)
 
-        self._hero_title = QLabel("Locus")
-        self._hero_title.setFont(serif_font(28))
-        self._hero_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._hero_title.setStyleSheet(f"color: {Theme.text()}; background: transparent;")
-        hero_layout.addWidget(self._hero_title)
+        # Serif title
+        self._title_lbl = QLabel("Locus")
+        self._title_lbl.setFont(serif(38))
+        self._title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
+        layout.addWidget(self._title_lbl)
+        layout.addSpacing(4)
 
-        self._status_label = QLabel("Ready to focus")
-        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._status_label.setFont(mono_font(11))
-        self._status_label.setStyleSheet(f"color: {Theme.text_secondary()}; background: transparent; letter-spacing: 0.5px;")
-        hero_layout.addWidget(self._status_label)
+        # Status
+        self._status_lbl = QLabel("Ready to focus")
+        self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_lbl.setStyleSheet(f"color: {TEXT_SEC}; background: transparent; font-size: 14px;")
+        layout.addWidget(self._status_lbl)
+        layout.addSpacing(28)
 
-        outer.addWidget(hero)
+        # Session input area
+        input_area = QWidget()
+        input_area.setMaximumWidth(440)
+        input_layout = QVBoxLayout(input_area)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(8)
 
-        # Session input card
-        input_card = Card()
-        input_layout = QVBoxLayout(input_card)
-        input_layout.setContentsMargins(20, 16, 20, 16)
-        input_layout.setSpacing(10)
-
-        section_lbl = QLabel("WHAT ARE YOU WORKING ON?")
-        section_lbl.setObjectName("section_label")
-        section_lbl.setFont(mono_font(10, medium=True))
-        section_lbl.setStyleSheet(f"color: {Theme.text_secondary()}; background: transparent; letter-spacing: 1.2px;")
-        input_layout.addWidget(section_lbl)
+        wao_lbl = QLabel("WHAT ARE YOU WORKING ON?")
+        wao_lbl.setFont(mono(10, medium=True))
+        wao_lbl.setStyleSheet(f"color: {TEXT_SEC}; background: transparent; letter-spacing: 1.2px;")
+        input_layout.addWidget(wao_lbl)
 
         self._custom_input = QLineEdit()
-        self._custom_input.setPlaceholderText("Name your session...")
+        self._custom_input.setPlaceholderText("e.g. Write essay intro")
         self._custom_input.returnPressed.connect(self._start_custom)
         input_layout.addWidget(self._custom_input)
+        input_layout.addSpacing(4)
 
-        self._start_btn = QPushButton("Start Session")
-        self._start_btn.setObjectName("primary")
+        self._start_btn = QPushButton("  Start Session")
+        self._start_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
         self._start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._start_btn.setFixedHeight(44)
+        self._start_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {ACCENT};
+                color: #1A1100;
+                border: none;
+                border-radius: 10px;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 0 20px;
+                text-align: center;
+            }}
+            QPushButton:hover {{ background: {ACCENT_HOVER}; }}
+            QPushButton:pressed {{ background: #BF811A; }}
+        """)
         self._start_btn.clicked.connect(self._start_custom)
+        # Draw play icon on button
+        self._start_btn.setIcon(QIcon(_nav_icon("start", 14, "#1A1100")))
+        self._start_btn.setIconSize(QSize(14, 14))
         input_layout.addWidget(self._start_btn)
 
         self._end_btn = QPushButton("End Session")
-        self._end_btn.setObjectName("secondary_btn")
         self._end_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._end_btn.setFixedHeight(44)
+        self._end_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #E53935;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background: #C62828; }}
+            QPushButton:pressed {{ background: #B71C1C; }}
+        """)
         self._end_btn.clicked.connect(lambda: _send_command("end_session"))
         self._end_btn.hide()
         input_layout.addWidget(self._end_btn)
 
-        outer.addWidget(input_card)
+        center_wrap = QHBoxLayout()
+        center_wrap.addStretch()
+        center_wrap.addWidget(input_area)
+        center_wrap.addStretch()
+        layout.addLayout(center_wrap)
+        layout.addSpacing(24)
+
+        # OR divider
+        or_row = QHBoxLayout()
+        l1 = QFrame(); l1.setFrameShape(QFrame.Shape.HLine)
+        l1.setStyleSheet(f"background: {BORDER}; max-height: 1px; border: none;")
+        or_lbl = QLabel("OR")
+        or_lbl.setFont(mono(9))
+        or_lbl.setFixedWidth(28)
+        or_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        or_lbl.setStyleSheet(f"color: {TEXT_LIGHT}; background: transparent; letter-spacing: 1px;")
+        l2 = QFrame(); l2.setFrameShape(QFrame.Shape.HLine)
+        l2.setStyleSheet(f"background: {BORDER}; max-height: 1px; border: none;")
+        or_row.addWidget(l1); or_row.addWidget(or_lbl); or_row.addWidget(l2)
+
+        or_wrap = QHBoxLayout()
+        or_wrap.addStretch()
+        or_w = QWidget(); or_w.setMaximumWidth(440)
+        or_w.setLayout(or_row)
+        or_wrap.addWidget(or_w)
+        or_wrap.addStretch()
+        layout.addLayout(or_wrap)
+        layout.addSpacing(20)
 
         # Events section
-        or_row = QHBoxLayout()
-        line1 = QFrame(); line1.setFrameShape(QFrame.Shape.HLine)
-        line1.setStyleSheet(f"color: {Theme.border()};")
-        or_lbl = QLabel("OR")
-        or_lbl.setFont(mono_font(10))
-        or_lbl.setStyleSheet(f"color: {Theme.text_secondary()}; background: transparent;")
-        line2 = QFrame(); line2.setFrameShape(QFrame.Shape.HLine)
-        line2.setStyleSheet(f"color: {Theme.border()};")
-        or_row.addWidget(line1)
-        or_row.addWidget(or_lbl)
-        or_row.addWidget(line2)
-        outer.addLayout(or_row)
+        events_wrap = QHBoxLayout()
+        events_wrap.addStretch()
+        self._events_widget = QWidget()
+        self._events_widget.setMaximumWidth(440)
+        self._events_layout = QVBoxLayout(self._events_widget)
+        self._events_layout.setContentsMargins(0, 0, 0, 0)
+        self._events_layout.setSpacing(0)
+        events_wrap.addWidget(self._events_widget)
+        events_wrap.addStretch()
+        layout.addLayout(events_wrap)
 
-        events_lbl = QLabel("UPCOMING ASSIGNMENTS")
-        events_lbl.setFont(mono_font(10, medium=True))
-        events_lbl.setStyleSheet(f"color: {Theme.text_secondary()}; background: transparent; letter-spacing: 1.2px;")
-        outer.addWidget(events_lbl)
+        scroll.setWidget(inner)
 
-        self._list = QListWidget()
-        self._list.setAlternatingRowColors(False)
-        self._list.doubleClicked.connect(self._start_selected)
-        self._list.setMinimumHeight(120)
-        outer.addWidget(self._list)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
-        start_selected_btn = QPushButton("Start Selected")
-        start_selected_btn.setObjectName("secondary_btn")
-        start_selected_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        start_selected_btn.clicked.connect(self._start_selected)
-        outer.addWidget(start_selected_btn)
+    def _update_icon(self):
+        color = "#E53935" if self._session_active else ACCENT
+        bg = "rgba(229,57,53,0.08)" if self._session_active else ACCENT_MUTED
 
-        outer.addStretch()
+        px = QPixmap(96, 96)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addEllipse(QRectF(0, 0, 96, 96))
+        p.fillPath(path, QBrush(QColor(ACCENT_MUTED if not self._session_active else "#FFEBEE")))
+        p.end()
 
-    def _update_lock_icon(self):
-        color = "#E53935" if self._session_active else Theme.ACCENT
-        px = _draw_lock_icon(64, self._session_active, color)
-        self._lock_label.setPixmap(px)
+        # Composite lock on top of circle
+        lock_px = _lock_pixmap(48, self._session_active, color)
+        final = QPixmap(96, 96)
+        final.fill(Qt.GlobalColor.transparent)
+        p2 = QPainter(final)
+        p2.drawPixmap(0, 0, px)
+        p2.drawPixmap(24, 24, lock_px)
+        p2.end()
+        self._icon_circle.setPixmap(final)
+
+    def _populate_events(self):
+        # Clear
+        while self._events_layout.count():
+            item = self._events_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not self._events:
+            no_ev = QLabel("No upcoming assignments")
+            no_ev.setStyleSheet(f"color: {TEXT_LIGHT}; background: transparent; font-size: 12px;")
+            no_ev.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._events_layout.addWidget(no_ev)
+            return
+
+        # Group by date
+        from collections import OrderedDict
+        import datetime
+        today = datetime.date.today().isoformat()
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+
+        groups = OrderedDict()
+        source_shown = set()
+
+        for ev in self._events:
+            date = ev.get("date", "")
+            source = ev.get("source", "notion")
+
+            # Section header for source
+            source_key = f"source_{source}"
+            if source_key not in source_shown:
+                source_shown.add(source_key)
+                src_lbl = QLabel("FROM NOTION" if source == "notion" else "FROM CALENDAR")
+                src_lbl.setFont(mono(9, medium=True))
+                src_lbl.setStyleSheet(f"color: {TEXT_LIGHT}; background: transparent; letter-spacing: 1px; margin-bottom: 6px;")
+                self._events_layout.addWidget(src_lbl)
+
+            if date not in groups:
+                groups[date] = []
+            groups[date].append(ev)
+
+        for date, evs in groups.items():
+            # Date header
+            if date == today:
+                date_str = "TODAY"
+            elif date == tomorrow:
+                date_str = "TOMORROW"
+            else:
+                try:
+                    import datetime
+                    d = datetime.date.fromisoformat(date)
+                    date_str = d.strftime("%A, %b %-d").upper()
+                except Exception:
+                    date_str = date
+
+            date_lbl = QLabel(date_str)
+            date_lbl.setFont(mono(9, medium=True))
+            date_lbl.setStyleSheet(f"color: {TEXT_SEC}; background: transparent; letter-spacing: 1px; margin-top: 10px; margin-bottom: 4px;")
+            self._events_layout.addWidget(date_lbl)
+
+            for ev in evs:
+                # Card container
+                card = QFrame()
+                card.setStyleSheet(f"""
+                    QFrame {{
+                        background: {CARD};
+                        border: 1px solid {BORDER};
+                        border-radius: 10px;
+                    }}
+                """)
+                card.setCursor(Qt.CursorShape.PointingHandCursor)
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(12, 10, 12, 10)
+                card_layout.setSpacing(4)
+
+                title_lbl = QLabel(ev.get("title", "?"))
+                title_lbl.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 500; background: transparent; border: none;")
+                card_layout.addWidget(title_lbl)
+
+                bottom = QHBoxLayout()
+                bottom.setSpacing(6)
+                bottom.setContentsMargins(0, 0, 0, 0)
+
+                class_name = ev.get("class_name", "")
+                if class_name:
+                    fg, bg = _tag_colors(class_name)
+                    tag = QLabel(class_name.upper())
+                    tag.setStyleSheet(f"""
+                        color: {fg};
+                        background: {bg};
+                        border-radius: 4px;
+                        padding: 1px 6px;
+                        font-size: 10px;
+                        font-weight: 600;
+                        letter-spacing: 0.5px;
+                        border: none;
+                    """)
+                    bottom.addWidget(tag)
+
+                if ev.get("start_time"):
+                    t_lbl = QLabel(ev["start_time"])
+                    t_lbl.setStyleSheet(f"color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;")
+                    bottom.addWidget(t_lbl)
+
+                bottom.addStretch()
+                card_layout.addLayout(bottom)
+
+                # Click to start
+                card.mousePressEvent = lambda e, ev=ev: _send_command("start_session", {
+                    "title": ev.get("title", ""),
+                    "date": ev.get("date", ""),
+                })
+                self._events_layout.addWidget(card)
+                self._events_layout.addSpacing(5)
 
     def update_state(self, state: dict):
         self._events = state.get("events", [])
-        session = state.get("session")
-        self._session_active = session is not None
-        self._session_name = session.get("display_name", "") if session else ""
+        self._session_info = state.get("session")
+        self._session_active = self._session_info is not None
 
-        self._update_lock_icon()
+        self._update_icon()
 
         if self._session_active:
-            self._hero_title.setText(self._session_name)
-            self._status_label.setText("Session active")
+            name = self._session_info.get("display_name", "Session")
+            self._title_lbl.setText(name)
+            self._status_lbl.setText("Session active")
             self._start_btn.hide()
             self._end_btn.show()
             self._custom_input.setEnabled(False)
         else:
-            self._hero_title.setText("Locus")
-            self._status_label.setText("Ready to focus")
+            self._title_lbl.setText("Locus")
+            self._status_lbl.setText("Ready to focus")
             self._start_btn.show()
             self._end_btn.hide()
             self._custom_input.setEnabled(True)
 
-        self._list.clear()
-        for ev in self._events:
-            label = f"{ev.get('title', '?')}  --  {ev.get('date', '')}"
-            if ev.get("start_time"):
-                label += f"  {ev['start_time']}"
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, ev)
-            self._list.addItem(item)
+        self._populate_events()
 
     def _start_custom(self):
         title = self._custom_input.text().strip()
         if title:
             _send_command("start_custom_session", {"title": title})
             self._custom_input.clear()
-
-    def _start_selected(self):
-        items = self._list.selectedItems()
-        if not items:
-            return
-        ev = items[0].data(Qt.ItemDataRole.UserRole)
-        _send_command("start_session", {
-            "title": ev.get("title", ""),
-            "date": ev.get("date", ""),
-        })
 
 
 # ── Placeholder panes ─────────────────────────────────────────────────────────
@@ -745,19 +875,25 @@ class PlaceholderPane(QWidget):
     def __init__(self, title: str, subtitle: str, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 60, 40, 40)
+        layout.setContentsMargins(36, 36, 36, 36)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         t = QLabel(title)
-        t.setFont(serif_font(24))
-        t.setStyleSheet(f"color: {Theme.text()}; background: transparent;")
+        t.setFont(serif(28))
+        t.setStyleSheet(f"color: {TEXT}; background: transparent;")
         layout.addWidget(t)
+        layout.addSpacing(6)
 
         s = QLabel(subtitle)
         s.setWordWrap(True)
-        s.setStyleSheet(f"color: {Theme.text_secondary()}; background: transparent; font-size: 13px;")
+        s.setStyleSheet(f"color: {TEXT_SEC}; background: transparent; font-size: 13px;")
         layout.addWidget(s)
         layout.addStretch()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(SURFACE))
+        p.end()
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -766,11 +902,10 @@ class LocusWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Locus")
-        self.setMinimumSize(700, 520)
-        self.resize(740, 560)
+        self.setMinimumSize(680, 500)
+        self.resize(720, 540)
         self.setWindowFlag(Qt.WindowType.Window)
-
-        self._sidebar_visible = True
+        self.setStyleSheet(STYLESHEET)
         self._build()
 
     def _build(self):
@@ -778,35 +913,29 @@ class LocusWindow(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Sidebar
         self._sidebar = Sidebar()
         self._sidebar.page_changed.connect(self._switch_page)
         root.addWidget(self._sidebar)
 
-        # Content area
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet(f"background: {Theme.surface()};")
+        self._stack.setStyleSheet(f"background: {SURFACE};")
 
         self._launcher = LauncherPane()
-        self._stack.addWidget(self._launcher)
+        self._stack.addWidget(self._launcher)                          # 0
 
-        self._settings_pane = PlaceholderPane(
-            "Settings",
-            "Configure blocking behavior, override code, notification preferences, and appearance."
-        )
-        self._stack.addWidget(self._settings_pane)
-
-        self._connectors_pane = PlaceholderPane(
+        self._stack.addWidget(PlaceholderPane(                         # 1
             "Connectors",
-            "Connect Notion or paste a calendar URL (Google Calendar, Apple Calendar, Schoology) to pull upcoming assignments."
-        )
-        self._stack.addWidget(self._connectors_pane)
-
-        self._analytics_pane = PlaceholderPane(
+            "Connect Notion or paste a calendar URL (Google Calendar, Apple Calendar, Schoology) "
+            "to pull upcoming assignments."
+        ))
+        self._stack.addWidget(PlaceholderPane(                         # 2
             "Analytics",
             "View your focus stats -- total time, sessions, most blocked apps and sites."
-        )
-        self._stack.addWidget(self._analytics_pane)
+        ))
+        self._stack.addWidget(PlaceholderPane(                         # 3
+            "Settings",
+            "Configure blocking behavior, override code, notification preferences, and appearance."
+        ))
 
         root.addWidget(self._stack)
 
@@ -816,33 +945,22 @@ class LocusWindow(QWidget):
     def update_state(self, state: dict):
         self._launcher.update_state(state)
 
-    def toggle_sidebar(self):
-        if self._sidebar_visible:
-            self._sidebar.hide()
-        else:
-            self._sidebar.show()
-        self._sidebar_visible = not self._sidebar_visible
-
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(Theme.surface()))
+        p.fillRect(self.rect(), QColor(SURFACE))
         p.end()
-
-    def keyPressEvent(self, event):
-        # Cmd/Ctrl+\ toggles sidebar
-        if event.key() == Qt.Key.Key_Backslash and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            self.toggle_sidebar()
-        super().keyPressEvent(event)
 
 
 # ── Tray app ──────────────────────────────────────────────────────────────────
 
 class LocusTrayApp(QSystemTrayIcon):
     def __init__(self, app: QApplication):
-        super().__init__(_draw_tray_icon(False))
+        super().__init__(_tray_pixmap(False))
         self._app = app
         self._session_active = False
-        self._window: LocusWindow = None
+        self._events = []
+        self._session_info = None
+        self._window: Optional[LocusWindow] = None
 
         self.setToolTip("Locus -- idle")
         self._build_menu()
@@ -882,31 +1000,29 @@ class LocusTrayApp(QSystemTrayIcon):
     def _open_window(self):
         if self._window is None:
             self._window = LocusWindow()
-            self._window.setStyleSheet(Theme.stylesheet())
-            # Feed current state
-            state = _read_state()
-            if state:
-                self._window.update_state(state)
+            self._window.destroyed.connect(lambda: setattr(self, "_window", None))
+        self._window.update_state({"events": self._events, "session": self._session_info})
         self._window.show()
         self._window.raise_()
         self._window.activateWindow()
 
     def _on_state_changed(self, state: dict):
-        session = state.get("session")
-        self._session_active = session is not None
+        self._events = state.get("events", [])
+        self._session_info = state.get("session")
+        self._session_active = self._session_info is not None
 
         if self._window:
             self._window.update_state(state)
 
         if self._session_active:
-            name = session.get("display_name", "Session")
-            self.setIcon(_draw_tray_icon(True))
+            name = self._session_info.get("display_name", "Session")
+            self.setIcon(_tray_pixmap(True))
             self.setToolTip(f"Locus -- {name}")
             self._status_action.setText(f"  {name}")
             self._start_action.setEnabled(False)
             self._end_action.setEnabled(True)
         else:
-            self.setIcon(_draw_tray_icon(False))
+            self.setIcon(_tray_pixmap(False))
             self.setToolTip("Locus -- idle")
             self._status_action.setText("Locus -- idle")
             self._start_action.setEnabled(True)
@@ -927,10 +1043,7 @@ def main():
     app.setApplicationName("Locus")
 
     _load_fonts()
-
-    # Auto-detect system dark mode
-    Theme.set_dark(_is_system_dark())
-    app.setStyleSheet(Theme.stylesheet())
+    app.setStyleSheet(STYLESHEET)
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         print("[Locus] System tray not available.")
