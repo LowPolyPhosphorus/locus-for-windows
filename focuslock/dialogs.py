@@ -21,14 +21,7 @@ from typing import Tuple, Callable, Any
 
 # ── Inter-thread dialog bridge ────────────────────────────────────────────────
 
-# Each item is a (fn, result_holder, done_event) tuple.
-# fn() builds and shows a Qt dialog and returns a value.
-# result_holder is a list so fn can write into it.
-# done_event is set when fn() finishes.
 _REQUEST_QUEUE: queue.Queue = queue.Queue()
-
-# Serialize dialogs -- only one at a time regardless of how many
-# violations fire simultaneously.
 _dialog_lock = threading.Lock()
 
 
@@ -46,7 +39,7 @@ def _run_on_main_thread(fn: Callable) -> Any:
             done.set()
 
     _REQUEST_QUEUE.put(_wrapped)
-    done.wait()  # no timeout -- waits as long as the user needs
+    done.wait()
     return result[0]
 
 
@@ -78,6 +71,71 @@ def show_notification(title: str, message: str):
         except Exception:
             pass
     print(f"[Locus] {title}: {message}")
+
+
+# ── Browser relaunch warning ──────────────────────────────────────────────────
+
+def ask_browser_relaunch(browser_name: str) -> bool:
+    """Warn the user that their browser will be relaunched.
+
+    Returns True if the user clicks Continue, False if they click Cancel.
+    """
+    from PyQt6.QtWidgets import (
+        QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    )
+    from PyQt6.QtCore import Qt
+
+    def _build():
+        dlg = QDialog()
+        dlg.setWindowTitle("Locus -- Browser Restart Required")
+        dlg.setMinimumWidth(420)
+        dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+        result = [False]
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        header = QLabel(f"<b>Locus needs to restart {browser_name}.</b>")
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        body = QLabel(
+            "To block websites, Locus needs to relaunch your browser in "
+            "a special mode. Your tabs will be restored automatically when "
+            "it reopens.\n\n"
+            "Save any unsaved work (forms, drafts, etc.) before continuing."
+        )
+        body.setWordWrap(True)
+        layout.addWidget(body)
+
+        btn_row = QHBoxLayout()
+
+        def _continue():
+            result[0] = True
+            dlg.accept()
+
+        def _cancel():
+            result[0] = False
+            dlg.reject()
+
+        ok = QPushButton("Continue -- Restart Browser")
+        ok.setDefault(True)
+        ok.clicked.connect(_continue)
+        cx = QPushButton("Cancel")
+        cx.clicked.connect(_cancel)
+
+        btn_row.addStretch()
+        btn_row.addWidget(cx)
+        btn_row.addWidget(ok)
+        layout.addLayout(btn_row)
+
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.exec()
+        return result[0]
+
+    return _run_qt_dialog(_build) or False
 
 
 # ── Dialogs ───────────────────────────────────────────────────────────────────
