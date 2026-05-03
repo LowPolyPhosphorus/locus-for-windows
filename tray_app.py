@@ -4,6 +4,9 @@ Runs the daemon in a background thread in the SAME process as the tray UI.
 This is required so dialogs.py's _REQUEST_QUEUE is shared between the
 daemon and the tray UI's main-thread drainer.
 
+On first launch, automatically sets up the browser debug port for website
+blocking via a one-time UAC prompt. Never asks again after that.
+
 Dependencies:
     pip install PyQt6 psutil pywin32 websocket-client requests win10toast
 
@@ -100,6 +103,78 @@ def _start_daemon_thread():
     t = threading.Thread(target=_run, daemon=True, name="locusd")
     t.start()
     return t
+
+
+# ── Browser debug setup ───────────────────────────────────────────────────────
+
+def _browser_debug_is_active() -> bool:
+    """Check if a browser is already running with the debug port open."""
+    try:
+        import requests
+        resp = requests.get("http://localhost:9222/json/version", timeout=1)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def _browser_debug_already_configured() -> bool:
+    """Check if the debug port flag is already in the registry."""
+    try:
+        import winreg
+        flag = "--remote-debugging-port=9222"
+        keys_to_check = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Vivaldi\shell\open\command"),
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Vivaldi\shell\open\command"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Google Chrome\shell\open\command"),
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Google Chrome\shell\open\command"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Microsoft Edge\shell\open\command"),
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Microsoft Edge\shell\open\command"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Clients\StartMenuInternet\Brave\shell\open\command"),
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Clients\StartMenuInternet\Brave\shell\open\command"),
+        ]
+        for hive, path in keys_to_check:
+            try:
+                with winreg.OpenKey(hive, path, 0, winreg.KEY_READ) as key:
+                    value, _ = winreg.QueryValueEx(key, "")
+                    if flag in value:
+                        return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
+def _run_browser_setup_elevated():
+    """Launch setup_browser_debug.py with a UAC elevation prompt."""
+    import ctypes
+    script = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "setup_browser_debug.py"
+    )
+    if not os.path.exists(script):
+        print("[Locus] setup_browser_debug.py not found, skipping browser setup.")
+        return
+    # "runas" triggers the UAC prompt -- user clicks Yes once, never again
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, f'"{script}"', None, 1
+    )
+
+
+def _setup_browser_debug_if_needed():
+    """Automatically set up the browser debug port on first launch.
+
+    Checks if already configured -- if so, does nothing.
+    If not, triggers a one-time UAC prompt to write the registry key.
+    After that first run it never prompts again.
+    """
+    if _browser_debug_is_active():
+        return  # already working, browser is open with debug port
+    if _browser_debug_already_configured():
+        return  # flag already in registry, just need to reopen browser
+
+    print("[Locus] First launch: setting up browser debug port for website blocking...")
+    # Run in a thread so it doesn't block the tray from appearing
+    threading.Thread(target=_run_browser_setup_elevated, daemon=True).start()
 
 
 # ── Background state watcher ──────────────────────────────────────────────────
@@ -298,6 +373,10 @@ def main():
     if not QSystemTrayIcon.isSystemTrayAvailable():
         print("[Locus] System tray not available.")
         sys.exit(1)
+
+    # On first launch, automatically configure the browser debug port.
+    # Triggers a one-time UAC prompt -- never asks again after that.
+    _setup_browser_debug_if_needed()
 
     # Start daemon in background thread -- same process so queue is shared
     _start_daemon_thread()
