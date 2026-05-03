@@ -4,9 +4,10 @@ Supports Chrome, Vivaldi, Edge, and Brave -- any Chromium browser that
 accepts --remote-debugging-port=9222.
 
 How it works:
-    1. A Chromium browser is launched with --remote-debugging-port=9222.
-       open_browser_with_debug() finds whichever supported browser is
-       installed (or already running with the debug port open).
+    1. When a session starts, open_browser_with_debug() checks if CDP is
+       reachable. If not, it finds whatever Chromium browser is running,
+       kills it, and relaunches it with --remote-debugging-port=9222.
+       The browser's built-in session restore brings tabs back automatically.
     2. We poll /json/list to get all open tabs and their URLs/titles.
     3. To close/redirect a tab we POST to its webSocketDebuggerUrl.
 
@@ -52,18 +53,15 @@ except Exception:
 
 CDP_HOST = "http://localhost:9222"
 
-# Internal browser pages -- never block these
 INTERNAL_SCHEMES = {"chrome", "about", "data", "chrome-extension", "devtools",
                     "vivaldi", "edge", "brave"}
 
-# Always allowed in any session
 ALWAYS_ALLOWED_DOMAINS = {"notion.so", "notionusercontent.com", "music.youtube.com"}
 
-# Tab titles too generic to check
 TITLE_IGNORE = {"youtube", "youtube music", "google", "new tab", "claude", ""}
 
 # Supported Chromium browsers in preference order.
-# Each entry is (display_name, list_of_candidate_exe_paths, process_names_to_check)
+# (display_name, exe_paths, process_exe_names)
 _BROWSER_CANDIDATES = [
     (
         "Vivaldi",
@@ -114,40 +112,97 @@ def _cdp_reachable() -> bool:
         return False
 
 
-def _find_browser() -> Optional[tuple]:
-    """Return (display_name, exe_path) for the first installed supported browser."""
-    for name, paths, _ in _BROWSER_CANDIDATES:
+def _find_installed_browser() -> Optional[tuple]:
+    """Return (display_name, exe_path, process_names) for the first installed browser."""
+    for name, paths, proc_names in _BROWSER_CANDIDATES:
         for path in paths:
             if path and os.path.exists(path):
-                return name, path
+                return name, path, proc_names
     return None
 
 
-def open_browser_with_debug(url: str = "about:blank"):
-    """Launch a Chromium browser with the remote debugging port open.
+def _find_running_browser() -> Optional[tuple]:
+    """Return (display_name, exe_path, process_names) for the first browser currently running."""
+    if not _PSUTIL:
+        return None
+    running = {p.name().lower() for p in _psutil.process_iter(["name"])}
+    for name, paths, proc_names in _BROWSER_CANDIDATES:
+        for proc_name in proc_names:
+            if proc_name.lower() in running:
+                # find the exe path
+                for path in paths:
+                    if path and os.path.exists(path):
+                        return name, path, proc_names
+                # fallback: return without a verified path
+                return name, None, proc_names
+    return None
 
-    If a browser is already running with CDP available, does nothing.
-    Tries Vivaldi, Chrome, Edge, Brave in that order.
+
+def _kill_browser(proc_names: tuple):
+    """Kill all processes matching any of the given exe names."""
+    if not _PSUTIL:
+        for name in proc_names:
+            subprocess.call(["taskkill", "/F", "/IM", name, "/T"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    for proc in _psutil.process_iter(["name", "pid"]):
+        try:
+            if proc.info["name"] and proc.info["name"].lower() in {n.lower() for n in proc_names}:
+                proc.kill()
+        except Exception:
+            pass
+
+
+def open_browser_with_debug(url: str = "about:blank"):
+    """Ensure a Chromium browser is running with --remote-debugging-port=9222.
+
+    If CDP is already reachable, does nothing.
+    If a supported browser is running WITHOUT the debug port, kills it and
+    relaunches it with the flag -- the browser's session restore brings
+    tabs back automatically.
+    If no browser is running, just launches one.
     """
     if _cdp_reachable():
-        return  # already up
+        return  # already up, nothing to do
 
-    result = _find_browser()
+    # Prefer a browser that's already running (kill + relaunch)
+    result = _find_running_browser() or _find_installed_browser()
     if not result:
         print("[Locus] No supported Chromium browser found (tried Vivaldi, Chrome, Edge, Brave).")
         return
 
-    name, path = result
-    print(f"[Locus] Launching {name} with debug port...")
+    name, path, proc_names = result
+
+    if not path:
+        print(f"[Locus] {name} is running but exe path not found -- cannot relaunch.")
+        return
+
+    print(f"[Locus] Relaunching {name} with debug port (tabs will restore automatically)...")
+
+    _kill_browser(proc_names)
+
+    # Give the browser a moment to fully exit
+    time.sleep(1.5)
+
     subprocess.Popen([
         path,
         "--remote-debugging-port=9222",
         "--remote-allow-origins=*",
-        url,
+        # restore-last-session makes session restore happen immediately
+        "--restore-last-session",
     ])
 
+    # Wait for CDP to come up (up to 10 seconds)
+    for _ in range(20):
+        time.sleep(0.5)
+        if _cdp_reachable():
+            print(f"[Locus] {name} debug port ready.")
+            return
 
-# Keep the old name as an alias so any existing callers don't break
+    print("[Locus] WARNING: Browser relaunched but debug port did not come up in time.")
+
+
+# Keep the old name as an alias
 open_chrome_with_debug = open_browser_with_debug
 
 
@@ -189,7 +244,6 @@ def _close_tab(ws_url: str):
 
 
 def _get_tab_url(ws_url: str) -> Optional[str]:
-    """Fetch the live URL of a tab via CDP (more accurate than /json/list cache)."""
     result = _cdp_send(ws_url, "Runtime.evaluate", {
         "expression": "window.location.href",
         "returnByValue": True,
