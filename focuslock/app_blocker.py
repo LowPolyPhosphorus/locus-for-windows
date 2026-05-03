@@ -23,7 +23,7 @@ try:
     _WIN32 = True
 except ImportError:
     _WIN32 = False
-    print("[Locus] WARNING: pywin32 not installed — frontmost-app tracking disabled.")
+    print("[Locus] WARNING: pywin32 not installed -- frontmost-app tracking disabled.")
 
 try:
     from .analytics import log_event as _log_event
@@ -65,11 +65,15 @@ ALWAYS_ALLOWED = {
     "fontdrvhost",
 }
 
-# Substrings — any process whose name contains one of these is always allowed
+# Substrings -- any process whose name contains one of these is always allowed
 ALWAYS_ALLOWED_SUBSTRINGS = (
     "agent", "daemon", "service", "extension",
     "update", "crash", "runtime",
 )
+
+# These are subprocess helpers, not real launchable apps.
+# On approve we skip open_app for these -- the parent app handles relaunching them.
+_NO_LAUNCH = {"steamwebhelper", "steamservice"}
 
 
 def _proc_name(proc: psutil.Process) -> str:
@@ -81,30 +85,6 @@ def _proc_name(proc: psutil.Process) -> str:
         return name.lower()
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return ""
-
-
-def _get_window_title(proc: psutil.Process) -> str:
-    """Return the window title of the main window for a process, or ''."""
-    if not _WIN32:
-        return ""
-    pid = proc.pid
-    titles: list[str] = []
-
-    def _cb(hwnd, _):
-        try:
-            _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-            if found_pid == pid and win32gui.IsWindowVisible(hwnd):
-                t = win32gui.GetWindowText(hwnd)
-                if t:
-                    titles.append(t)
-        except Exception:
-            pass
-
-    try:
-        win32gui.EnumWindows(_cb, None)
-    except Exception:
-        pass
-    return titles[0] if titles else ""
 
 
 class AppBlocker:
@@ -125,8 +105,11 @@ class AppBlocker:
         self._thread: Optional[threading.Thread] = None
         self._queue_thread: Optional[threading.Thread] = None
         self._focus_thread: Optional[threading.Thread] = None
-        self._handling: Set[str] = set()          # names currently in queue or being shown
-        self._violation_queue: queue.Queue = queue.Queue()  # (name, proc) tuples
+
+        # Names currently in the queue or actively being shown a dialog.
+        # The poll loop skips these entirely -- no killing while a dialog is up.
+        self._handling: Set[str] = set()
+        self._violation_queue: queue.Queue = queue.Queue()
         self._focus_app: Optional[str] = None
         self._focus_since: float = 0.0
         self.session_name: str = ""
@@ -149,7 +132,7 @@ class AppBlocker:
         self._running = True
         self._focus_app = None
         self._focus_since = time.time()
-        # Drain any stale queue entries from a previous session
+        # Drain stale queue entries from a previous session
         while not self._violation_queue.empty():
             try:
                 self._violation_queue.get_nowait()
@@ -170,16 +153,16 @@ class AppBlocker:
         self.temporarily_allowed.clear()
         self._handling.clear()
         self._focus_app = None
-        # Drain the queue so old violations don't carry into the next session
         while not self._violation_queue.empty():
             try:
                 self._violation_queue.get_nowait()
             except queue.Empty:
                 break
-        self._violation_queue.put(None)
+        self._violation_queue.put(None)  # stop sentinel for queue worker
 
     def open_app(self, app_name: str):
-        # Some apps need their full path — check common install locations
+        if app_name.lower() in _NO_LAUNCH:
+            return
         _known_paths = {
             "steam": r"C:\Program Files (x86)\Steam\steam.exe",
         }
@@ -248,8 +231,7 @@ class AppBlocker:
     # ── Termination ───────────────────────────────────────────────────────
 
     def _terminate_app(self, name: str, proc: Optional[psutil.Process] = None):
-        """Gracefully close, then force-kill if needed."""
-        # Steam's visible window is owned by steamwebhelper — kill the full tree
+        """Kill an app. For Steam, takes down the full process tree."""
         if "steam" in name:
             subprocess.run(["taskkill", "/IM", "steamservice.exe", "/F", "/T"], capture_output=True)
             subprocess.run(["taskkill", "/IM", "steam.exe", "/F", "/T"], capture_output=True)
@@ -267,10 +249,10 @@ class AppBlocker:
         else:
             subprocess.run(["taskkill", "/F", "/IM", exe, "/T"], capture_output=True)
 
-    # ── Name remapping — map subprocess names to their parent app ────────
+    # ── Name remapping ────────────────────────────────────────────────────
 
     def _remap_name(self, name: str) -> str:
-        """Map subprocess-only process names to their logical parent app name."""
+        """Map subprocess names to their logical parent app."""
         if "steam" in name:
             return "steam"
         return name
@@ -284,9 +266,12 @@ class AppBlocker:
                     if self._is_allowed(name):
                         continue
                     display_name = self._remap_name(name)
+
+                    # Already in queue or dialog is showing -- do NOT kill it.
+                    # The queue worker will handle it once the user responds.
                     if display_name in self._handling:
-                        self._terminate_app(display_name, proc)
                         continue
+
                     self._handling.add(display_name)
                     self._violation_queue.put((display_name, proc))
                     print(f"[Locus] Queued violation: {display_name}")
@@ -294,14 +279,25 @@ class AppBlocker:
                 print(f"[Locus] App blocker error: {e}")
             time.sleep(self.poll_seconds)
 
-    # ── Queue worker — shows dialogs one at a time ────────────────────────
+    # ── Queue worker ──────────────────────────────────────────────────────
 
     def _queue_worker(self):
-        """Single thread that processes violations one at a time, in order."""
-        while self._running:
+        """Single thread that shows dialogs one at a time.
+
+        Fixes:
+        - No timeout: the dialog waits as long as the user needs.
+          The app stays open until the user actually responds.
+        - No restart on approve: we only kill AFTER the user denies.
+          If approved, the app was never touched so it keeps running.
+        - No silent close: _handling blocks the poll loop from touching
+          the app while the dialog is up, so it can't get killed mid-dialog.
+        """
+        while True:
             try:
                 item = self._violation_queue.get(timeout=1)
             except queue.Empty:
+                if not self._running:
+                    break
                 continue
 
             if item is None:  # stop sentinel
@@ -309,17 +305,26 @@ class AppBlocker:
 
             name, proc = item
             try:
-                # Check if still not allowed (user may have whitelisted it while queued)
+                # Skip if the user whitelisted it while it was queued
                 if self._is_allowed(name):
                     print(f"[Locus] {name} now allowed, skipping dialog")
                     continue
-                # Show dialog — blocks until user responds
+
+                # Show dialog -- no timeout, waits for the user
                 self.on_blocked(name)
-                # After dialog: only kill if still not allowed (user denied)
-                if not self._is_allowed(name):
-                    self._terminate_app(name, proc)
-                else:
+
+                # After dialog returns: check what the user decided
+                if self._is_allowed(name):
+                    # Approved -- app is still running, leave it alone
                     print(f"[Locus] {name} approved, leaving open")
+                    if name not in _NO_LAUNCH:
+                        # Don't relaunch -- it never closed
+                        pass
+                else:
+                    # Denied -- now kill it
+                    print(f"[Locus] {name} denied, terminating")
+                    self._terminate_app(name, proc)
+
             except Exception as e:
                 print(f"[Locus] Queue worker error for {name}: {e}")
             finally:
