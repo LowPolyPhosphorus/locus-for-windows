@@ -1,15 +1,4 @@
-"""Locus — headless focus daemon. (Windows)
-
-Launched by the PyQt6 tray UI (replaces the Swift app).
-
-Changes from macOS version:
-- tab_id: Optional[int]  →  ws_url: Optional[str]  (CDP WebSocket URL)
-- check_tab_status / close_tab_by_id / navigate_tab_by_id / redirect_tab_by_id
-  replaced with URLMonitor's new CDP-based equivalents
-- SIGTERM handling made Windows-safe (signal.SIGTERM not reliably catchable
-  on Windows; we use a threading.Event stopped by CTRL_C_EVENT / SIGINT)
-- dialogs.show_notification wired to Windows toast (handled in dialogs.py)
-"""
+"""Locus -- headless focus daemon. (Windows)"""
 
 import json
 import os
@@ -29,16 +18,29 @@ from . import dialogs
 from .analytics import log_event, compute_summary
 from .paths import CONFIG_PATH, STATE_PATH, COMMAND_PATH, ANALYTICS_PATH, LOCK_PATH
 
+# Sentinel meaning "allowed for the rest of the session" -- no expiry set
+FOREVER = -1
+
+
+def _duration_label(minutes: int) -> str:
+    """Human-readable label for a duration. -1 = for this session."""
+    if minutes == FOREVER:
+        return "for this session"
+    if minutes >= 60:
+        h = minutes // 60
+        return f"for {h} hour{'s' if h > 1 else ''}"
+    return f"for {minutes} min"
+
 
 def load_config() -> dict:
     try:
         with open(CONFIG_PATH) as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"[config] {CONFIG_PATH} not found — using defaults")
+        print(f"[config] {CONFIG_PATH} not found -- using defaults")
         return {}
     except json.JSONDecodeError as e:
-        print(f"[config] {CONFIG_PATH} is malformed ({e}) — using defaults")
+        print(f"[config] {CONFIG_PATH} is malformed ({e}) -- using defaults")
         return {}
 
 
@@ -147,7 +149,6 @@ class FocusLockApp:
         self._write_state()
 
     def _write_state(self):
-        """Write events + session info for the tray UI to read."""
         state = {
             "events": [asdict(e) for e in self.all_events],
             "session": {
@@ -177,7 +178,6 @@ class FocusLockApp:
             pass
 
     def _command_loop(self):
-        """Watch for commands written by the tray UI."""
         while True:
             if os.path.exists(COMMAND_PATH):
                 try:
@@ -251,8 +251,6 @@ class FocusLockApp:
             allow_domains=mapping.get("allow_domains", []),
         )
 
-    # ── Session control ───────────────────────────────────────────────────
-
     def _event_to_session(self, ev: NotionEvent) -> FocusSession:
         self.config = load_config()
         activities = self.config.get("activities", {})
@@ -265,6 +263,8 @@ class FocusLockApp:
             allow_apps=mapping.get("allow_apps", []),
             allow_domains=mapping.get("allow_domains", []),
         )
+
+    # ── Session control ───────────────────────────────────────────────────
 
     def _start_session(self, session: FocusSession):
         self.current_session = session
@@ -291,8 +291,6 @@ class FocusLockApp:
         self.url_monitor.set_session_allowed_domains(session.allow_domains)
         self.url_monitor.session_name = session.display_name
 
-        # If the browser needs relaunching, warn the user first.
-        # If they cancel, skip website blocking for this session.
         if not _cdp_reachable():
             browser_info = _find_running_browser()
             if browser_info:
@@ -302,13 +300,11 @@ class FocusLockApp:
                     open_browser_with_debug()
                     self.url_monitor.start()
                 else:
-                    print("[Locus] User skipped browser relaunch -- website blocking disabled for this session.")
+                    print("[Locus] User skipped browser relaunch -- website blocking disabled.")
             else:
-                # No browser running at all -- just launch one with the flag
                 open_browser_with_debug()
                 self.url_monitor.start()
         else:
-            # CDP already reachable, no relaunch needed
             self.url_monitor.start()
 
         self._write_state()
@@ -331,6 +327,22 @@ class FocusLockApp:
         self._write_analytics()
         dialogs.show_notification("Locus", "Session ended. Nice work!")
 
+    # ── Allow helpers ─────────────────────────────────────────────────────
+
+    def _apply_app_allow(self, app_name: str, duration: int):
+        """Allow an app for the given duration. -1 = rest of session."""
+        if duration == FOREVER:
+            self.app_blocker.allow_temporarily(app_name, minutes=60 * 24)  # 24h effectively forever
+        else:
+            self.app_blocker.allow_temporarily(app_name, minutes=duration)
+
+    def _apply_url_allow(self, domain: str, duration: int):
+        """Allow a domain for the given duration. -1 = rest of session."""
+        if duration == FOREVER:
+            self.url_monitor.allow_domain_temporarily(domain, minutes=60 * 24)
+        else:
+            self.url_monitor.allow_domain_temporarily(domain, minutes=duration)
+
     # ── Violation handlers ────────────────────────────────────────────────
 
     def _on_blocked_app(self, app_name: str):
@@ -339,69 +351,63 @@ class FocusLockApp:
             log_event("app_blocked", app_name=app_name, session_name=session_name)
         except Exception:
             pass
+
         action, reason = dialogs.ask_reason(app_name, "app", session_name)
 
         if action == "cancel":
             self.app_blocker.deny(app_name)
             try:
-                log_event("app_denied", app_name=app_name, reason="cancel",
-                          session_name=session_name)
+                log_event("app_denied", app_name=app_name, reason="cancel", session_name=session_name)
             except Exception:
                 pass
             return
 
         if action == "override":
             if dialogs.ask_override_code(self.config.get("override_code", "")):
-                mins = self.config.get("temporary_allow_minutes", 15)
-                self.app_blocker.allow_temporarily(app_name, minutes=mins)
+                self._apply_app_allow(app_name, FOREVER)
                 self.app_blocker.open_app(app_name)
-                dialogs.show_notification("Override accepted", f"{app_name} allowed for {mins} min")
+                dialogs.show_notification("Override accepted", f"{app_name} allowed for this session")
                 try:
-                    log_event("app_allowed", app_name=app_name, reason="override",
-                              session_name=session_name)
+                    log_event("app_allowed", app_name=app_name, reason="override", session_name=session_name)
                 except Exception:
                     pass
             else:
                 dialogs.show_override_wrong()
                 self.app_blocker.deny(app_name)
                 try:
-                    log_event("app_denied", app_name=app_name, reason="override_wrong",
-                              session_name=session_name)
+                    log_event("app_denied", app_name=app_name, reason="override_wrong", session_name=session_name)
                 except Exception:
                     pass
             return
 
         if not reason.strip():
-            dialogs.show_result(False, "No reason provided.", app_name)
+            dialogs.show_result(False, "No reason provided.", app_name, minutes=0)
             self.app_blocker.deny(app_name)
             try:
-                log_event("app_denied", app_name=app_name, reason="no_reason",
-                          session_name=session_name)
+                log_event("app_denied", app_name=app_name, reason="no_reason", session_name=session_name)
             except Exception:
                 pass
             return
 
         dialogs.show_notification("Locus", "Evaluating your reason...")
-        approved, explanation = self.claude.evaluate_reason(
+        approved, explanation, duration = self.claude.evaluate_reason(
             subject=app_name, subject_type="app",
             session_name=session_name, reason=reason,
         )
-        mins = self.config.get("temporary_allow_minutes", 15)
-        dialogs.show_result(approved, explanation, app_name, minutes=mins)
+        dialogs.show_result(approved, explanation, app_name, minutes=duration)
 
         if approved:
-            self.app_blocker.allow_temporarily(app_name, minutes=mins)
+            self._apply_app_allow(app_name, duration)
             self.app_blocker.open_app(app_name)
             try:
                 log_event("app_allowed", app_name=app_name, reason="ai_approved",
-                          session_name=session_name)
+                          duration=duration, session_name=session_name)
             except Exception:
                 pass
         else:
             self.app_blocker.deny(app_name)
             try:
-                log_event("app_denied", app_name=app_name, reason="ai_denied",
-                          session_name=session_name)
+                log_event("app_denied", app_name=app_name, reason="ai_denied", session_name=session_name)
             except Exception:
                 pass
 
@@ -418,12 +424,12 @@ class FocusLockApp:
             domain, session_name, tab_title,
         )
         if auto_allow:
-            mins = self.config.get("temporary_allow_minutes", 15)
-            self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
-            print(f"[FocusLock] Auto-allowed {domain}: {ai_reason}")
+            # Auto-allowed sites get a reasonable window -- not forever,
+            # since the AI didn't get to ask the student about intent
+            self._apply_url_allow(domain, 60)
+            print(f"[Locus] Auto-allowed {domain}: {ai_reason}")
             try:
-                log_event("url_allowed", domain=domain, reason="ai_approved",
-                          session_name=session_name)
+                log_event("url_allowed", domain=domain, reason="ai_auto", session_name=session_name)
             except Exception:
                 pass
             return
@@ -441,55 +447,49 @@ class FocusLockApp:
 
         if action == "cancel":
             try:
-                log_event("url_denied", domain=domain, reason="cancel",
-                          session_name=session_name)
+                log_event("url_denied", domain=domain, reason="cancel", session_name=session_name)
             except Exception:
                 pass
             return
 
         if action == "override":
             if dialogs.ask_override_code(self.config.get("override_code", "")):
-                mins = self.config.get("temporary_allow_minutes", 15)
-                self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
+                self._apply_url_allow(domain, FOREVER)
                 self.url_monitor.set_title_cooldown(domain, seconds=7)
                 if ws_url:
                     self.url_monitor.redirect_tab(ws_url, original_url)
                 else:
                     self.url_monitor.navigate_chrome_to(original_url)
-                dialogs.show_notification("Override accepted", f"{domain} allowed for {mins} min")
+                dialogs.show_notification("Override accepted", f"{domain} allowed for this session")
                 try:
-                    log_event("url_allowed", domain=domain, reason="override",
-                              session_name=session_name)
+                    log_event("url_allowed", domain=domain, reason="override", session_name=session_name)
                 except Exception:
                     pass
             else:
                 dialogs.show_override_wrong()
                 try:
-                    log_event("url_denied", domain=domain, reason="override_wrong",
-                              session_name=session_name)
+                    log_event("url_denied", domain=domain, reason="override_wrong", session_name=session_name)
                 except Exception:
                     pass
             return
 
         if not reason.strip():
-            dialogs.show_result(False, "No reason provided.", domain)
+            dialogs.show_result(False, "No reason provided.", domain, minutes=0)
             try:
-                log_event("url_denied", domain=domain, reason="no_reason",
-                          session_name=session_name)
+                log_event("url_denied", domain=domain, reason="no_reason", session_name=session_name)
             except Exception:
                 pass
             return
 
         dialogs.show_notification("Locus", "Evaluating your reason...")
-        approved, explanation = self.claude.evaluate_reason(
+        approved, explanation, duration = self.claude.evaluate_reason(
             subject=domain, subject_type="website",
             session_name=session_name, reason=reason,
         )
-        mins = self.config.get("temporary_allow_minutes", 15)
-        dialogs.show_result(approved, explanation, domain, minutes=mins)
+        dialogs.show_result(approved, explanation, domain, minutes=duration)
 
         if approved:
-            self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
+            self._apply_url_allow(domain, duration)
             self.url_monitor.set_title_cooldown(domain, seconds=10)
             if ws_url:
                 self.url_monitor.redirect_tab(ws_url, original_url)
@@ -497,13 +497,12 @@ class FocusLockApp:
                 self.url_monitor.navigate_chrome_to(original_url)
             try:
                 log_event("url_allowed", domain=domain, reason="ai_approved",
-                          session_name=session_name)
+                          duration=duration, session_name=session_name)
             except Exception:
                 pass
         else:
             try:
-                log_event("url_denied", domain=domain, reason="ai_denied",
-                          session_name=session_name)
+                log_event("url_denied", domain=domain, reason="ai_denied", session_name=session_name)
             except Exception:
                 pass
 
@@ -520,8 +519,7 @@ class FocusLockApp:
             return
 
         try:
-            log_event("off_topic_detected", domain=domain, title=tab_title,
-                      session_name=session_name)
+            log_event("off_topic_detected", domain=domain, title=tab_title, session_name=session_name)
         except Exception:
             pass
 
@@ -542,17 +540,16 @@ class FocusLockApp:
             return
 
         dialogs.show_notification("Locus", "Evaluating your reason...")
-        approved, explanation = self.claude.evaluate_reason(
+        approved, explanation, duration = self.claude.evaluate_reason(
             subject=f"{domain} -- \"{tab_title}\"",
             subject_type="website content",
             session_name=session_name,
             reason=user_reason,
         )
-        mins = self.config.get("temporary_allow_minutes", 15)
-        dialogs.show_result(approved, explanation, domain, minutes=mins)
+        dialogs.show_result(approved, explanation, domain, minutes=duration)
 
         if approved:
-            self.url_monitor.allow_domain_temporarily(domain, minutes=mins)
+            self._apply_url_allow(domain, duration)
             self.url_monitor.set_title_cooldown(domain, seconds=10)
             self.url_monitor.open_url_in_new_tab(f"https://{domain}")
 
