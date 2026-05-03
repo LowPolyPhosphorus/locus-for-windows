@@ -1,15 +1,60 @@
 """User-facing prompts and notifications. (Windows)
 
-Replaces the macOS version which wrote prompt.json and waited for the
-Swift app to respond via response.json. On Windows there is no Swift app —
-dialogs are PyQt6 windows spawned directly from the daemon thread.
+Dialogs must run on Qt's main thread. The daemon's queue worker runs on a
+background thread. We bridge this with a simple request/response queue:
+
+  - Background thread calls ask_reason() etc. as normal
+  - ask_reason() pushes a request onto _REQUEST_QUEUE and blocks on an Event
+  - The tray app's main thread drains _REQUEST_QUEUE every 100ms via a QTimer
+  - Main thread builds and shows the dialog, puts the result in the Event
+  - Background thread unblocks and returns the result
+
+This is the only reliable way to show Qt dialogs from non-main threads.
 
 Dependencies:
     pip install PyQt6 win10toast
 """
 
+import queue
 import threading
-from typing import Tuple
+from typing import Tuple, Callable, Any
+
+# ── Inter-thread dialog bridge ────────────────────────────────────────────────
+
+# Each item is a (fn, result_holder, done_event) tuple.
+# fn() builds and shows a Qt dialog and returns a value.
+# result_holder is a list so fn can write into it.
+# done_event is set when fn() finishes.
+_REQUEST_QUEUE: queue.Queue = queue.Queue()
+
+# Serialize dialogs -- only one at a time regardless of how many
+# violations fire simultaneously.
+_dialog_lock = threading.Lock()
+
+
+def _run_on_main_thread(fn: Callable) -> Any:
+    """Push fn onto the main thread queue and block until it completes."""
+    done = threading.Event()
+    result = [None]
+
+    def _wrapped():
+        try:
+            result[0] = fn()
+        except Exception as e:
+            print(f"[Locus] Dialog error: {e}")
+        finally:
+            done.set()
+
+    _REQUEST_QUEUE.put(_wrapped)
+    done.wait()  # no timeout -- waits as long as the user needs
+    return result[0]
+
+
+def _run_qt_dialog(fn: Callable) -> Any:
+    """Serialize and run a Qt dialog on the main thread."""
+    with _dialog_lock:
+        return _run_on_main_thread(fn)
+
 
 # ── Toast notifications ───────────────────────────────────────────────────────
 
@@ -35,65 +80,13 @@ def show_notification(title: str, message: str):
     print(f"[Locus] {title}: {message}")
 
 
-# ── Qt helpers ────────────────────────────────────────────────────────────────
-
-# Serialize all dialogs — Qt dialogs must run on the main thread one at a time.
-# Without this, simultaneous violations queue up on the main thread via
-# QTimer.singleShot and only the first one shows; the rest time out silently.
-_dialog_lock = threading.Lock()
-
-
-def _run_qt_dialog(fn):
-    """Run a Qt dialog safely from any thread, one at a time."""
-    import sys
-    from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtCore import QTimer, QThread
-
-    with _dialog_lock:
-        app = QApplication.instance()
-        _created = False
-        if app is None:
-            app = QApplication(sys.argv)
-            _created = True
-
-        result = {}
-        done = threading.Event()
-
-        def _run():
-            result["value"] = fn()
-            done.set()
-            if _created:
-                app.quit()
-
-        # If we're already on the main thread, run directly
-        if QThread.currentThread() is app.thread():
-            _run()
-        else:
-            # Marshal to main thread via QTimer on the main thread
-            timer = QTimer()
-            timer.setSingleShot(True)
-            timer.moveToThread(app.thread())
-            timer.timeout.connect(_run)
-            timer.start(0)
-
-        if _created:
-            app.exec()
-        else:
-            done.wait(timeout=600)
-
-        return result.get("value")
-
-
 # ── Dialogs ───────────────────────────────────────────────────────────────────
 
 def ask_reason(
     blocked_name: str,
-    blocked_type: str,   # "app" or "website"
+    blocked_type: str,
     session_name: str,
 ) -> Tuple[str, str]:
-    """Show the reason prompt. Returns (action, reason).
-    action ∈ {"submit", "override", "cancel"}
-    """
     from PyQt6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     )
@@ -101,7 +94,7 @@ def ask_reason(
 
     def _build():
         dlg = QDialog()
-        dlg.setWindowTitle("Locus — Access Request")
+        dlg.setWindowTitle("Locus -- Access Request")
         dlg.setMinimumWidth(420)
         dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         result = ["cancel", ""]
@@ -116,7 +109,7 @@ def ask_reason(
         layout.addWidget(QLabel(f"Why do you need this {blocked_type}?"))
 
         inp = QLineEdit()
-        inp.setPlaceholderText("Enter your reason…")
+        inp.setPlaceholderText("Enter your reason...")
         layout.addWidget(inp)
 
         btn_row = QHBoxLayout()
@@ -135,9 +128,9 @@ def ask_reason(
             dlg.reject()
 
         inp.returnPressed.connect(_submit)
-        ov = QPushButton("Override…"); ov.clicked.connect(_override)
-        ok = QPushButton("Submit");    ok.setDefault(True); ok.clicked.connect(_submit)
-        cx = QPushButton("Cancel");    cx.clicked.connect(_cancel)
+        ov = QPushButton("Override..."); ov.clicked.connect(_override)
+        ok = QPushButton("Submit");      ok.setDefault(True); ok.clicked.connect(_submit)
+        cx = QPushButton("Cancel");      cx.clicked.connect(_cancel)
         btn_row.addWidget(ov)
         btn_row.addStretch()
         btn_row.addWidget(cx)
@@ -253,7 +246,7 @@ def ask_off_topic_reason(
 
     def _build():
         dlg = QDialog()
-        dlg.setWindowTitle("Locus — Off-Topic Content")
+        dlg.setWindowTitle("Locus -- Off-Topic Content")
         dlg.setMinimumWidth(440)
         dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         result = ["cancel", ""]
@@ -276,7 +269,7 @@ def ask_off_topic_reason(
 
         layout.addWidget(QLabel("Why is this relevant to your session?"))
         inp = QLineEdit()
-        inp.setPlaceholderText("Enter your reason…")
+        inp.setPlaceholderText("Enter your reason...")
         layout.addWidget(inp)
 
         btn_row = QHBoxLayout()
