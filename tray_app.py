@@ -1,21 +1,20 @@
 """Locus Windows Tray UI
 
-Replaces the Swift/SwiftUI macOS app.
-Runs as a system tray icon; communicates with the daemon via the same
-command.json / state.json files the Swift app used -- zero daemon changes.
+Runs the daemon in a background thread in the SAME process as the tray UI.
+This is required so dialogs.py's _REQUEST_QUEUE is shared between the
+daemon and the tray UI's main-thread drainer.
 
 Dependencies:
-    pip install PyQt6
+    pip install PyQt6 psutil pywin32 websocket-client requests win10toast
 
 Run:
-    pythonw tray_app.py   (pythonw suppresses the console window)
-    or bundle with PyInstaller (see build_daemon.ps1)
+    python tray_app.py
+    pythonw tray_app.py   (suppresses console window)
 """
 
 import json
 import os
 import sys
-import subprocess
 import threading
 import time
 from typing import Optional
@@ -23,15 +22,15 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog, QVBoxLayout,
     QHBoxLayout, QLabel, QPushButton, QLineEdit, QListWidget,
-    QListWidgetItem, QWidget, QSizePolicy, QMessageBox,
+    QListWidgetItem, QMessageBox,
 )
-from PyQt6.QtGui import QIcon, QPixmap, QColor, QPainter, QFont
+from PyQt6.QtGui import QIcon, QPixmap, QColor, QPainter
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
 
-from focuslock.paths import STATE_PATH, COMMAND_PATH, CONFIG_PATH, ANALYTICS_PATH
+from focuslock.paths import STATE_PATH, COMMAND_PATH, CONFIG_PATH
 
 
-# ── Tiny icon factory ─────────────────────────────────────────────────────────
+# ── Icon factory ──────────────────────────────────────────────────────────────
 
 def _make_icon(color: str) -> QIcon:
     px = QPixmap(32, 32)
@@ -55,14 +54,6 @@ def _read_state() -> dict:
         return {}
 
 
-def _read_config() -> dict:
-    try:
-        with open(CONFIG_PATH) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
 def _send_command(cmd_type: str, data: dict = None):
     cmd = {"type": cmd_type, "data": data or {}}
     tmp = COMMAND_PATH + ".tmp"
@@ -74,19 +65,41 @@ def _send_command(cmd_type: str, data: dict = None):
         print(f"[Locus UI] Failed to write command: {e}")
 
 
-# ── Dialog queue drainer (THE FIX) ───────────────────────────────────────────
-# dialogs.py pushes callables onto _REQUEST_QUEUE from background threads.
-# This function runs on the Qt main thread every 100ms and executes them.
-# This is the only reliable way to show Qt dialogs from non-main threads.
+# ── Dialog queue drainer ──────────────────────────────────────────────────────
+# Runs on the Qt main thread every 100ms.
+# Picks up dialog callables that dialogs.py pushed from background threads
+# and executes them here -- same process, same queue object, dialogs show.
 
 def _drain_dialog_queue():
     from focuslock.dialogs import _REQUEST_QUEUE
-    while True:
-        try:
+    try:
+        while True:
             fn = _REQUEST_QUEUE.get_nowait()
-            fn()  # runs on main thread -- dialog shows correctly
-        except Exception:
-            break
+            fn()
+    except Exception:
+        pass
+
+
+# ── Daemon thread launcher ────────────────────────────────────────────────────
+
+def _start_daemon_thread():
+    """Run the Locus daemon in a background thread of this process.
+
+    Same process = shared _REQUEST_QUEUE = dialogs actually work.
+    """
+    from focuslock.app import main as daemon_main
+
+    def _run():
+        try:
+            daemon_main()
+        except SystemExit:
+            pass
+        except Exception as e:
+            print(f"[Locus] Daemon crashed: {e}")
+
+    t = threading.Thread(target=_run, daemon=True, name="locusd")
+    t.start()
+    return t
 
 
 # ── Background state watcher ──────────────────────────────────────────────────
@@ -114,7 +127,7 @@ class StateWatcher(QObject):
         self._running = False
 
 
-# ── Session picker dialog ─────────────────────────────────────────────────────
+# ── Session picker ────────────────────────────────────────────────────────────
 
 class SessionPickerDialog(QDialog):
     def __init__(self, events: list, parent=None):
@@ -141,7 +154,7 @@ class SessionPickerDialog(QDialog):
         self.list_widget.doubleClicked.connect(self._pick_selected)
         layout.addWidget(self.list_widget)
 
-        layout.addWidget(QLabel("or start a custom session:"))
+        layout.addWidget(QLabel("Or start a custom session:"))
         self.custom_input = QLineEdit()
         self.custom_input.setPlaceholderText("Session name...")
         self.custom_input.returnPressed.connect(self._pick_custom)
@@ -179,7 +192,7 @@ class SessionPickerDialog(QDialog):
         self._pick_selected()
 
 
-# ── Main tray application ─────────────────────────────────────────────────────
+# ── Tray app ──────────────────────────────────────────────────────────────────
 
 class LocusTrayApp(QSystemTrayIcon):
     def __init__(self, app: QApplication):
@@ -193,7 +206,6 @@ class LocusTrayApp(QSystemTrayIcon):
         self._build_menu()
         self.activated.connect(self._on_activated)
 
-        # State watcher thread
         self._watcher = StateWatcher()
         self._watcher_thread = QThread()
         self._watcher.moveToThread(self._watcher_thread)
@@ -218,12 +230,11 @@ class LocusTrayApp(QSystemTrayIcon):
         self._end_action.setEnabled(False)
 
         menu.addSeparator()
-        refresh_action = menu.addAction("Refresh Schedule")
-        refresh_action.triggered.connect(lambda: _send_command("refresh"))
-
+        menu.addAction("Refresh Schedule").triggered.connect(
+            lambda: _send_command("refresh")
+        )
         menu.addSeparator()
-        quit_action = menu.addAction("Quit Locus")
-        quit_action.triggered.connect(self._quit)
+        menu.addAction("Quit Locus").triggered.connect(self._quit)
 
         self.setContextMenu(menu)
 
@@ -275,30 +286,11 @@ class LocusTrayApp(QSystemTrayIcon):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def _ensure_daemon():
-    """Launch locusd if it isn't already running."""
-    import psutil
-    for proc in psutil.process_iter(["name", "cmdline"]):
-        try:
-            cmdline = " ".join(proc.info.get("cmdline") or [])
-            if "locusd_entry" in cmdline or "locusd" in cmdline:
-                return
-        except Exception:
-            pass
-    subprocess.Popen(
-        [sys.executable, "locusd_entry.py"],
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    )
-
-
 def main():
-    _ensure_daemon()
-
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Locus")
 
-    # Icons must be created AFTER QApplication
     global ICON_IDLE, ICON_ACTIVE
     ICON_IDLE   = _make_icon("#5A5A5A")
     ICON_ACTIVE = _make_icon("#E53935")
@@ -307,9 +299,10 @@ def main():
         print("[Locus] System tray not available.")
         sys.exit(1)
 
-    # THE FIX: drain the dialog request queue on the main thread every 100ms.
-    # dialogs.py pushes callables here from background threads; we execute
-    # them here so Qt dialogs always run on the main thread.
+    # Start daemon in background thread -- same process so queue is shared
+    _start_daemon_thread()
+
+    # Drain dialog requests from the daemon onto the main thread every 100ms
     dialog_timer = QTimer()
     dialog_timer.timeout.connect(_drain_dialog_queue)
     dialog_timer.start(100)
