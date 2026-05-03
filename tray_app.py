@@ -2,7 +2,7 @@
 
 Replaces the Swift/SwiftUI macOS app.
 Runs as a system tray icon; communicates with the daemon via the same
-command.json / state.json files the Swift app used — zero daemon changes.
+command.json / state.json files the Swift app used -- zero daemon changes.
 
 Dependencies:
     pip install PyQt6
@@ -31,7 +31,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
 from focuslock.paths import STATE_PATH, COMMAND_PATH, CONFIG_PATH, ANALYTICS_PATH
 
 
-# ── Tiny icon factory (draws a coloured circle — replace with a real .ico) ───
+# ── Tiny icon factory ─────────────────────────────────────────────────────────
 
 def _make_icon(color: str) -> QIcon:
     px = QPixmap(32, 32)
@@ -45,7 +45,7 @@ def _make_icon(color: str) -> QIcon:
     return QIcon(px)
 
 
-# ── State reader ──────────────────────────────────────────────────────────────
+# ── State helpers ─────────────────────────────────────────────────────────────
 
 def _read_state() -> dict:
     try:
@@ -72,6 +72,21 @@ def _send_command(cmd_type: str, data: dict = None):
         os.replace(tmp, COMMAND_PATH)
     except Exception as e:
         print(f"[Locus UI] Failed to write command: {e}")
+
+
+# ── Dialog queue drainer (THE FIX) ───────────────────────────────────────────
+# dialogs.py pushes callables onto _REQUEST_QUEUE from background threads.
+# This function runs on the Qt main thread every 100ms and executes them.
+# This is the only reliable way to show Qt dialogs from non-main threads.
+
+def _drain_dialog_queue():
+    from focuslock.dialogs import _REQUEST_QUEUE
+    while True:
+        try:
+            fn = _REQUEST_QUEUE.get_nowait()
+            fn()  # runs on main thread -- dialog shows correctly
+        except Exception:
+            break
 
 
 # ── Background state watcher ──────────────────────────────────────────────────
@@ -117,7 +132,7 @@ class SessionPickerDialog(QDialog):
         self.list_widget = QListWidget()
         self.list_widget.setAlternatingRowColors(True)
         for ev in events:
-            label = f"{ev.get('title', '?')}  ·  {ev.get('date', '')}"
+            label = f"{ev.get('title', '?')}  -  {ev.get('date', '')}"
             if ev.get("start_time"):
                 label += f"  {ev['start_time']}"
             item = QListWidgetItem(label)
@@ -126,9 +141,9 @@ class SessionPickerDialog(QDialog):
         self.list_widget.doubleClicked.connect(self._pick_selected)
         layout.addWidget(self.list_widget)
 
-        layout.addWidget(QLabel("— or start a custom session —"))
+        layout.addWidget(QLabel("or start a custom session:"))
         self.custom_input = QLineEdit()
-        self.custom_input.setPlaceholderText("Session name…")
+        self.custom_input.setPlaceholderText("Session name...")
         self.custom_input.returnPressed.connect(self._pick_custom)
         layout.addWidget(self.custom_input)
 
@@ -164,91 +179,6 @@ class SessionPickerDialog(QDialog):
         self._pick_selected()
 
 
-# ── Reason dialog (mirrors Swift PromptView) ──────────────────────────────────
-
-class ReasonDialog(QDialog):
-    def __init__(self, subject: str, subject_type: str, session_name: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Locus — Access Request")
-        self.setMinimumWidth(400)
-        self.action = "cancel"
-        self.reason = ""
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(16, 16, 16, 16)
-
-        header = QLabel(f"<b>{subject}</b> is blocked during <i>{session_name}</i>.")
-        header.setWordWrap(True)
-        layout.addWidget(header)
-        layout.addWidget(QLabel(f"Why do you need this {subject_type}?"))
-
-        self.reason_input = QLineEdit()
-        self.reason_input.setPlaceholderText("Enter your reason…")
-        self.reason_input.returnPressed.connect(self._submit)
-        layout.addWidget(self.reason_input)
-
-        btn_row = QHBoxLayout()
-        submit_btn = QPushButton("Submit")
-        submit_btn.setDefault(True)
-        submit_btn.clicked.connect(self._submit)
-        override_btn = QPushButton("Override…")
-        override_btn.clicked.connect(self._override)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(override_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(submit_btn)
-        layout.addLayout(btn_row)
-
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
-        self.raise_()
-        self.activateWindow()
-
-    def _submit(self):
-        self.action = "submit"
-        self.reason = self.reason_input.text().strip()
-        self.accept()
-
-    def _override(self):
-        self.action = "override"
-        self.accept()
-
-
-# ── Override code dialog ──────────────────────────────────────────────────────
-
-class OverrideDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Enter Override Code")
-        self.setMinimumWidth(300)
-        self.code = ""
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.addWidget(QLabel("Enter the override code:"))
-        self.code_input = QLineEdit()
-        self.code_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.code_input.returnPressed.connect(self.accept)
-        layout.addWidget(self.code_input)
-        btn_row = QHBoxLayout()
-        ok_btn = QPushButton("OK")
-        ok_btn.setDefault(True)
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addStretch()
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(ok_btn)
-        layout.addLayout(btn_row)
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
-
-    def get_code(self) -> str:
-        return self.code_input.text()
-
-
 # ── Main tray application ─────────────────────────────────────────────────────
 
 class LocusTrayApp(QSystemTrayIcon):
@@ -259,7 +189,7 @@ class LocusTrayApp(QSystemTrayIcon):
         self._events = []
         self._session_info = None
 
-        self.setToolTip("Locus — idle")
+        self.setToolTip("Locus -- idle")
         self._build_menu()
         self.activated.connect(self._on_activated)
 
@@ -276,11 +206,11 @@ class LocusTrayApp(QSystemTrayIcon):
     def _build_menu(self):
         menu = QMenu()
 
-        self._status_action = menu.addAction("Locus — idle")
+        self._status_action = menu.addAction("Locus -- idle")
         self._status_action.setEnabled(False)
         menu.addSeparator()
 
-        self._start_action = menu.addAction("Start Session…")
+        self._start_action = menu.addAction("Start Session...")
         self._start_action.triggered.connect(self._start_session)
 
         self._end_action = menu.addAction("End Session")
@@ -309,14 +239,14 @@ class LocusTrayApp(QSystemTrayIcon):
         if self._session_active:
             name = self._session_info.get("display_name", "Session")
             self.setIcon(ICON_ACTIVE)
-            self.setToolTip(f"Locus — {name}")
-            self._status_action.setText(f"🔴  {name}")
+            self.setToolTip(f"Locus -- {name}")
+            self._status_action.setText(f"  {name}")
             self._start_action.setEnabled(False)
             self._end_action.setEnabled(True)
         else:
             self.setIcon(ICON_IDLE)
-            self.setToolTip("Locus — idle")
-            self._status_action.setText("Locus — idle")
+            self.setToolTip("Locus -- idle")
+            self._status_action.setText("Locus -- idle")
             self._start_action.setEnabled(True)
             self._end_action.setEnabled(False)
 
@@ -341,162 +271,6 @@ class LocusTrayApp(QSystemTrayIcon):
         self._watcher_thread.quit()
         self._watcher_thread.wait(2000)
         self._app.quit()
-
-
-# ── dialogs.py shim ───────────────────────────────────────────────────────────
-
-DIALOGS_PY = '''"""dialogs.py — Windows replacement for macOS AppleScript popups."""
-import sys
-import threading
-from typing import Tuple
-
-try:
-    from win10toast import ToastNotifier
-    _toaster = ToastNotifier()
-    _TOAST = True
-except ImportError:
-    _TOAST = False
-
-
-def show_notification(title: str, message: str):
-    if _TOAST:
-        try:
-            threading.Thread(
-                target=_toaster.show_toast,
-                args=(title, message),
-                kwargs={"duration": 5, "threaded": True},
-                daemon=True,
-            ).start()
-        except Exception:
-            pass
-    print(f"[Locus] {title}: {message}")
-
-
-def _run_qt_dialog(fn):
-    from PyQt6.QtWidgets import QApplication
-    app = QApplication.instance()
-    _created = False
-    if app is None:
-        app = QApplication(sys.argv)
-        _created = True
-    result = {}
-    done = threading.Event()
-
-    def _run():
-        result["value"] = fn()
-        done.set()
-        if _created:
-            app.quit()
-
-    from PyQt6.QtCore import QTimer
-    QTimer.singleShot(0, _run)
-    if _created:
-        app.exec()
-    else:
-        done.wait(timeout=120)
-    return result.get("value")
-
-
-def ask_reason(subject: str, subject_type: str, session_name: str) -> Tuple[str, str]:
-    from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
-    from PyQt6.QtCore import Qt
-
-    def _build():
-        dlg = QDialog()
-        dlg.setWindowTitle("Locus — Access Request")
-        dlg.setMinimumWidth(400)
-        dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
-        result = ["cancel", ""]
-
-        layout = QVBoxLayout(dlg)
-        layout.setSpacing(10)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.addWidget(QLabel(f"<b>{subject}</b> is blocked during <i>{session_name}</i>."))
-        layout.addWidget(QLabel(f"Why do you need this {subject_type}?"))
-        inp = QLineEdit()
-        inp.setPlaceholderText("Enter your reason…")
-        layout.addWidget(inp)
-
-        btn_row = QHBoxLayout()
-        def _submit():
-            result[0] = "submit"
-            result[1] = inp.text().strip()
-            dlg.accept()
-        def _override():
-            result[0] = "override"
-            dlg.accept()
-        def _cancel():
-            result[0] = "cancel"
-            dlg.reject()
-
-        inp.returnPressed.connect(_submit)
-        ov = QPushButton("Override…"); ov.clicked.connect(_override)
-        ok = QPushButton("Submit"); ok.setDefault(True); ok.clicked.connect(_submit)
-        cx = QPushButton("Cancel"); cx.clicked.connect(_cancel)
-        btn_row.addWidget(ov); btn_row.addStretch(); btn_row.addWidget(cx); btn_row.addWidget(ok)
-        layout.addLayout(btn_row)
-
-        dlg.raise_(); dlg.activateWindow(); dlg.exec()
-        return tuple(result)
-
-    return _run_qt_dialog(_build) or ("cancel", "")
-
-
-def ask_override_code(correct_code: str) -> bool:
-    from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
-    from PyQt6.QtCore import Qt
-
-    def _build():
-        dlg = QDialog()
-        dlg.setWindowTitle("Override Code")
-        dlg.setMinimumWidth(300)
-        dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
-        result = [False]
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.addWidget(QLabel("Enter override code:"))
-        inp = QLineEdit(); inp.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addWidget(inp)
-        btn_row = QHBoxLayout()
-        def _ok():
-            result[0] = inp.text() == correct_code
-            dlg.accept()
-        inp.returnPressed.connect(_ok)
-        ok = QPushButton("OK"); ok.setDefault(True); ok.clicked.connect(_ok)
-        cx = QPushButton("Cancel"); cx.clicked.connect(dlg.reject)
-        btn_row.addStretch(); btn_row.addWidget(cx); btn_row.addWidget(ok)
-        layout.addLayout(btn_row)
-        dlg.raise_(); dlg.activateWindow(); dlg.exec()
-        return result[0]
-
-    return _run_qt_dialog(_build) or False
-
-
-def show_result(approved: bool, explanation: str, subject: str, minutes: int = 15):
-    from PyQt6.QtWidgets import QMessageBox
-    import PyQt6.QtCore
-    msg = QMessageBox()
-    msg.setWindowFlag(PyQt6.QtCore.Qt.WindowType.WindowStaysOnTopHint)
-    if approved:
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setWindowTitle("Access Granted")
-        msg.setText(f"<b>{subject}</b> allowed for {minutes} min.\\n\\n{explanation}")
-    else:
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle("Access Denied")
-        msg.setText(f"<b>{subject}</b> blocked.\\n\\n{explanation}")
-    msg.exec()
-
-
-def show_override_wrong():
-    from PyQt6.QtWidgets import QMessageBox
-    QMessageBox.warning(None, "Wrong Code", "Incorrect override code.")
-
-
-def ask_off_topic_reason(domain: str, title: str, session_name: str, ai_reason: str):
-    return ask_reason(f"{domain} — \\"{title}\\"", "content", session_name)
-'''
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -533,16 +307,16 @@ def main():
         print("[Locus] System tray not available.")
         sys.exit(1)
 
+    # THE FIX: drain the dialog request queue on the main thread every 100ms.
+    # dialogs.py pushes callables here from background threads; we execute
+    # them here so Qt dialogs always run on the main thread.
+    dialog_timer = QTimer()
+    dialog_timer.timeout.connect(_drain_dialog_queue)
+    dialog_timer.start(100)
+
     tray = LocusTrayApp(app)
     sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-    # Write dialogs.py if missing
-    dialogs_path = os.path.join(os.path.dirname(__file__), "focuslock", "dialogs.py")
-    if not os.path.exists(dialogs_path):
-        os.makedirs(os.path.dirname(dialogs_path), exist_ok=True)
-        with open(dialogs_path, "w") as f:
-            f.write(DIALOGS_PY)
-        print(f"[Locus] Wrote {dialogs_path}")
     main()
