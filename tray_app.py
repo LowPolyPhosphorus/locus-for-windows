@@ -465,6 +465,35 @@ class NavRow(QPushButton):
         p.end()
 
 
+class _HamburgerButton(QPushButton):
+    """Three-line hamburger button for sidebar toggle."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(36, 36)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{ background: {BORDER}; }}
+        """)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(TEXT_SEC), 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        cx = self.width() // 2
+        w = 14
+        for y in [12, 18, 24]:
+            p.drawLine(cx - w//2, y, cx + w//2, y)
+        p.end()
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 # Order matches the screenshot: Start, Connectors, Analytics, Settings
@@ -495,10 +524,10 @@ class Sidebar(QWidget):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 0, 8, 16)
+        layout.setContentsMargins(8, 0, 8, 8)
         layout.setSpacing(0)
 
-        # Header
+        # Header -- just lock icon + title, no arrow
         hdr = QWidget()
         hdr.setFixedHeight(62)
         hdr.setStyleSheet("background: transparent;")
@@ -516,19 +545,6 @@ class Sidebar(QWidget):
         self._title_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
         hl.addWidget(self._title_lbl)
         hl.addStretch()
-
-        self._toggle_btn = QPushButton("‹")
-        self._toggle_btn.setFixedSize(24, 24)
-        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._toggle_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {TEXT_SEC};
-                border: none; font-size: 15px; border-radius: 4px;
-            }}
-            QPushButton:hover {{ background: {BORDER}; }}
-        """)
-        self._toggle_btn.clicked.connect(self.toggle_collapse)
-        hl.addWidget(self._toggle_btn)
         layout.addWidget(hdr)
 
         for label, icon_name, idx in PAGES:
@@ -539,13 +555,18 @@ class Sidebar(QWidget):
             layout.addSpacing(2)
 
         layout.addStretch()
+
+        # Hamburger toggle at the bottom
+        self._hamburger = _HamburgerButton()
+        self._hamburger.clicked.connect(self.toggle_collapse)
+        layout.addWidget(self._hamburger)
+
         self._rows[0].set_selected(True)
 
     def toggle_collapse(self):
         self._collapsed = not self._collapsed
         target = SIDEBAR_COLLAPSED if self._collapsed else SIDEBAR_EXPANDED
 
-        # Animate both min and max width together
         for anim in (self._anim, self._anim2):
             anim.stop()
             anim.setStartValue(self.width())
@@ -553,11 +574,11 @@ class Sidebar(QWidget):
             anim.start()
 
         if self._collapsed:
-            self._toggle_btn.setText("›")
             self._title_lbl.hide()
+            self._lock_lbl.hide()
         else:
-            self._toggle_btn.setText("‹")
             self._title_lbl.show()
+            self._lock_lbl.show()
 
         for row in self._rows:
             row.set_collapsed(self._collapsed)
@@ -640,6 +661,7 @@ class LauncherPane(QWidget):
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(0)
+        # AlignHCenter ensures content is centered in whatever width is available
         layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         # Lock icon circle
@@ -732,9 +754,9 @@ class LauncherPane(QWidget):
         input_layout.addWidget(self._end_btn)
 
         center_wrap = QHBoxLayout()
-        center_wrap.addStretch()
-        center_wrap.addWidget(input_area, 1)
-        center_wrap.addStretch()
+        center_wrap.addStretch(1)
+        center_wrap.addWidget(input_area, 0)
+        center_wrap.addStretch(1)
         layout.addLayout(center_wrap)
         layout.addSpacing(24)
 
@@ -752,24 +774,24 @@ class LauncherPane(QWidget):
         or_row.addWidget(l1); or_row.addWidget(or_lbl); or_row.addWidget(l2)
 
         or_wrap = QHBoxLayout()
-        or_wrap.addStretch()
-        or_w = QWidget(); or_w.setMaximumWidth(440)
+        or_wrap.addStretch(1)
+        or_w = QWidget(); or_w.setMaximumWidth(480)
         or_w.setLayout(or_row)
-        or_wrap.addWidget(or_w)
-        or_wrap.addStretch()
+        or_wrap.addWidget(or_w, 0)
+        or_wrap.addStretch(1)
         layout.addLayout(or_wrap)
         layout.addSpacing(20)
 
         # Events section
         events_wrap = QHBoxLayout()
-        events_wrap.addStretch()
+        events_wrap.addStretch(1)
         self._events_widget = QWidget()
-        self._events_widget.setMaximumWidth(440)
+        self._events_widget.setMaximumWidth(480)
         self._events_layout = QVBoxLayout(self._events_widget)
         self._events_layout.setContentsMargins(0, 0, 0, 0)
         self._events_layout.setSpacing(0)
-        events_wrap.addWidget(self._events_widget)
-        events_wrap.addStretch()
+        events_wrap.addWidget(self._events_widget, 0)
+        events_wrap.addStretch(1)
         layout.addLayout(events_wrap)
 
         scroll.setWidget(inner)
