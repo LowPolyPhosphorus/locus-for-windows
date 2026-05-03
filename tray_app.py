@@ -44,12 +44,12 @@ class Theme:
     TEXT         = "#1A1409"
     TEXT_SECONDARY = "#7A6A4A"
 
-    # Dark palette
-    SURFACE_DARK = "#151009"
-    CARD_DARK    = "#211A0B"
-    BORDER_DARK  = "#FFFFFF17"
-    TEXT_DARK    = "#F5EDD8"
-    TEXT_SECONDARY_DARK = "#9A8A6A"
+    # Dark palette -- matches Swift dark variants
+    SURFACE_DARK = "#14100A"
+    CARD_DARK    = "#1E1608"
+    BORDER_DARK  = "#FFFFFF18"
+    TEXT_DARK    = "#F0E6CC"
+    TEXT_SECONDARY_DARK = "#8A7A5A"
 
     _dark = False
 
@@ -103,15 +103,15 @@ class Theme:
         QLineEdit:focus {{ border-color: {cls.ACCENT}; }}
         QPushButton#primary {{
             background: {cls.ACCENT};
-            color: #1A1409;
+            color: #1A1409 !important;
             font-weight: 600;
             font-size: 13px;
             border-radius: 8px;
             padding: 8px 20px;
             border: none;
         }}
-        QPushButton#primary:hover {{ background: #D4911C; }}
-        QPushButton#primary:pressed {{ background: #C07F10; }}
+        QPushButton#primary:hover {{ background: #D4911C; color: #1A1409; }}
+        QPushButton#primary:pressed {{ background: #C07F10; color: #1A1409; }}
         QPushButton#secondary_btn {{
             background: transparent;
             color: {t};
@@ -459,7 +459,7 @@ class NavItem(QPushButton):
     def _update_style(self):
         if self._selected:
             bg = Theme.ACCENT_MUTED
-            tc = Theme.TEXT
+            tc = "#1A1409"  # always dark on the muted gold background
         else:
             bg = "transparent"
             tc = Theme.text()
@@ -475,7 +475,8 @@ class NavItem(QPushButton):
                 border: none;
             }}
             QPushButton:hover {{
-                background: {'#F0E8D0' if not Theme._dark else '#2A2010'};
+                background: {'rgba(232,160,32,0.15)' if Theme._dark else '#F0E8D0'};
+                color: {tc};
             }}
         """)
 
@@ -565,6 +566,7 @@ class Sidebar(QWidget):
 class Card(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -614,7 +616,6 @@ class LauncherPane(QWidget):
 
         self._status_label = QLabel("Ready to focus")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._status_label.setObjectName("secondary")
         self._status_label.setFont(mono_font(11))
         self._status_label.setStyleSheet(f"color: {Theme.text_secondary()}; background: transparent; letter-spacing: 0.5px;")
         hero_layout.addWidget(self._status_label)
