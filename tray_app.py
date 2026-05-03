@@ -27,6 +27,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtCore import (
     Qt, QTimer, pyqtSignal, QObject, QThread, QSize, QRectF, QPointF,
+    QPropertyAnimation, QEasingCurve,
 )
 
 from focuslock.paths import STATE_PATH, COMMAND_PATH, CONFIG_PATH
@@ -125,12 +126,23 @@ QMenu::separator {{ background: {BORDER}; height: 1px; margin: 4px 10px; }}
 # ── Font helpers ──────────────────────────────────────────────────────────────
 
 def _load_fonts():
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "FocusLockApp", "Fonts")
-    for fname in ["InstrumentSerif-Regular.ttf", "InstrumentSerif-Italic.ttf",
-                  "DMMono-Regular.ttf", "DMMono-Medium.ttf"]:
-        path = os.path.join(base, fname)
-        if os.path.exists(path):
-            QFontDatabase.addApplicationFont(path)
+    # Try assets/fonts first (correct location), fall back to FocusLockApp/Fonts
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base_dir, "assets", "fonts"),
+        os.path.join(base_dir, "FocusLockApp", "Fonts"),
+    ]
+    for base in candidates:
+        if os.path.isdir(base):
+            for fname in ["InstrumentSerif-Regular.ttf", "InstrumentSerif-Italic.ttf",
+                          "DMMono-Regular.ttf", "DMMono-Medium.ttf"]:
+                path = os.path.join(base, fname)
+                if os.path.exists(path):
+                    fid = QFontDatabase.addApplicationFont(path)
+                    if fid >= 0:
+                        families = QFontDatabase.applicationFontFamilies(fid)
+                        print(f"[Locus] Loaded font: {fname} -> {families}")
+            break
 
 
 def serif(size: int) -> QFont:
@@ -154,15 +166,14 @@ def mono(size: int, medium: bool = False) -> QFont:
 # ── Icon drawing ──────────────────────────────────────────────────────────────
 
 def _lock_pixmap(size: int, locked: bool, color: str) -> QPixmap:
-    """Outline-style lock icon -- no fill, just stroked shackle and body."""
-    # Add padding so the stroke doesn't clip at the edges
-    pad = int(size * 0.08)
+    """Outline-style lock icon -- stroked shackle and body, no fill."""
+    stroke = max(2.0, size * 0.09)
+    half = stroke / 2
     px = QPixmap(size, size)
     px.fill(Qt.GlobalColor.transparent)
     p = QPainter(px)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     c = QColor(color)
-    stroke = max(1.5, size * 0.085)
 
     pen = QPen(c, stroke)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -170,24 +181,23 @@ def _lock_pixmap(size: int, locked: bool, color: str) -> QPixmap:
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
 
-    # Shackle (arc on top)
-    sw = size * 0.42
-    sh = size * 0.38
+    # Shackle -- keep inside pixmap bounds with half-stroke padding
+    sw = size * 0.46
+    sh = size * 0.40
     sx = (size - sw) / 2
-    sy = pad
+    sy = half + 1  # ensure top of arc is never clipped
     if locked:
         p.drawArc(QRectF(sx, sy, sw, sh), 0, 180 * 16)
     else:
-        # Open -- arc lifted on right side
-        p.drawArc(QRectF(sx, sy - size * 0.08, sw, sh), 25 * 16, 130 * 16)
+        p.drawArc(QRectF(sx, sy, sw, sh * 0.9), 25 * 16, 130 * 16)
 
-    # Body (rounded rect, outline only)
-    bw = size * 0.64
-    bh = size * 0.42
+    # Body -- outline only, no fill
+    bw = size * 0.72
+    bh = size * 0.44
     bx = (size - bw) / 2
     by = size * 0.50
     path = QPainterPath()
-    path.addRoundedRect(bx, by, bw, bh, size * 0.09, size * 0.09)
+    path.addRoundedRect(bx + half, by, bw - stroke, bh - half, size * 0.09, size * 0.09)
     p.drawPath(path)
 
     p.end()
@@ -444,7 +454,12 @@ class NavRow(QPushButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = ACCENT if self._selected else TEXT_SEC
         icon_px = _nav_icon(self._icon_name, ICON_SIZE, color)
-        x = (self.width() - ICON_SIZE) // 2 if self._collapsed else 10
+        # When collapsed or collapsing: center the icon
+        # When expanded: fixed 10px from left
+        if self._collapsed:
+            x = (self.width() - ICON_SIZE) // 2
+        else:
+            x = 10
         y = (self.height() - ICON_SIZE) // 2
         p.drawPixmap(x, y, icon_px)
         p.end()
@@ -463,7 +478,6 @@ PAGES = [
 
 class Sidebar(QWidget):
     page_changed = pyqtSignal(int)
-    collapse_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -471,16 +485,23 @@ class Sidebar(QWidget):
         self._current = 0
         self._rows = []
         self.setFixedWidth(SIDEBAR_EXPANDED)
+        self._anim = QPropertyAnimation(self, b"minimumWidth")
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._anim2 = QPropertyAnimation(self, b"maximumWidth")
+        self._anim2.setDuration(180)
+        self._anim2.setEasingCurve(QEasingCurve.Type.InOutCubic)
         self._build()
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 0, 8, 16)
+        layout.setContentsMargins(8, 0, 8, 16)
         layout.setSpacing(0)
 
-        # Header row -- lock icon + Locus title + collapse button
+        # Header
         hdr = QWidget()
         hdr.setFixedHeight(62)
+        hdr.setStyleSheet("background: transparent;")
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(8, 0, 4, 0)
         hl.setSpacing(8)
@@ -496,19 +517,15 @@ class Sidebar(QWidget):
         hl.addWidget(self._title_lbl)
         hl.addStretch()
 
-        # Collapse toggle button
         self._toggle_btn = QPushButton("‹")
         self._toggle_btn.setFixedSize(24, 24)
         self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
-                color: {TEXT_SEC};
-                border: none;
-                font-size: 16px;
-                border-radius: 4px;
+                background: transparent; color: {TEXT_SEC};
+                border: none; font-size: 15px; border-radius: 4px;
             }}
-            QPushButton:hover {{ background: {CARD}; }}
+            QPushButton:hover {{ background: {BORDER}; }}
         """)
         self._toggle_btn.clicked.connect(self.toggle_collapse)
         hl.addWidget(self._toggle_btn)
@@ -526,17 +543,24 @@ class Sidebar(QWidget):
 
     def toggle_collapse(self):
         self._collapsed = not self._collapsed
+        target = SIDEBAR_COLLAPSED if self._collapsed else SIDEBAR_EXPANDED
+
+        # Animate both min and max width together
+        for anim in (self._anim, self._anim2):
+            anim.stop()
+            anim.setStartValue(self.width())
+            anim.setEndValue(target)
+            anim.start()
+
         if self._collapsed:
-            self.setFixedWidth(SIDEBAR_COLLAPSED)
-            self._title_lbl.hide()
             self._toggle_btn.setText("›")
+            self._title_lbl.hide()
         else:
-            self.setFixedWidth(SIDEBAR_EXPANDED)
-            self._title_lbl.show()
             self._toggle_btn.setText("‹")
+            self._title_lbl.show()
+
         for row in self._rows:
             row.set_collapsed(self._collapsed)
-        self.collapse_toggled.emit(self._collapsed)
 
     def _select(self, idx: int):
         for row in self._rows:
@@ -547,7 +571,7 @@ class Sidebar(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(SURFACE))
+        p.fillRect(self.rect(), QColor(CARD))  # cream, slightly darker than surface
         p.setPen(QPen(QColor(BORDER), 1))
         p.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
         p.end()
