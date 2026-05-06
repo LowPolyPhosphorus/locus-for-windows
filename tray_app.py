@@ -664,7 +664,6 @@ class LauncherPane(QWidget):
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(0)
-        # AlignHCenter ensures content is centered in whatever width is available
         layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         # Lock icon circle
@@ -967,13 +966,7 @@ class LauncherPane(QWidget):
         self._populate_events()
 
     def set_sidebar_width(self, sidebar_w: int):
-        """Keep content centered relative to full window by accounting for sidebar."""
-        # The launcher spans the full window. To center content in the visible
-        # area (right of sidebar), we add left padding = sidebar_w and equal
-        # right padding. But to center in the FULL window, we just use equal
-        # margins -- the sidebar floats on top so we only need enough left
-        # padding to clear the sidebar visually.
-        self._scroll_inner.setContentsMargins(sidebar_w + 16, 32, 16, 32)
+        pass  # intentionally empty -- content stays centered, sidebar draws on top
 
     def _start_custom(self):
         title = self._custom_input.text().strip()
