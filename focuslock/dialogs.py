@@ -138,20 +138,12 @@ def _dialog_style() -> str:
 
 def _serif_font(size: int):
     from PyQt6.QtGui import QFont
-    f = QFont("Instrument Serif")
-    if not f.exactMatch():
-        f = QFont("Georgia")
-    f.setPointSize(size)
-    return f
+    return QFont("Instrument Serif", size)
 
 
 def _mono_font(size: int):
     from PyQt6.QtGui import QFont
-    f = QFont("DM Mono")
-    if not f.exactMatch():
-        f = QFont("Consolas")
-    f.setPointSize(size)
-    return f
+    return QFont("DM Mono", size)
 
 
 def _draw_icon_circle(icon_char: str, bg: str, fg: str, size: int = 52):
