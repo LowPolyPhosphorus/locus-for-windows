@@ -994,7 +994,755 @@ class PlaceholderPane(QWidget):
         p.end()
 
 
-# ── Main window ───────────────────────────────────────────────────────────────
+# ── Settings pane ─────────────────────────────────────────────────────────────
+
+SETTINGS_PAGES = ["General", "Blocking", "Allowlists", "Notifications", "Advanced"]
+
+def _settings_label(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setFont(QFont("DM Mono", 9))
+    lbl.setStyleSheet(f"color: {TEXT_LIGHT}; background: transparent; letter-spacing: 1px;")
+    return lbl
+
+def _settings_row_label(title: str, subtitle: str = "") -> QWidget:
+    w = QWidget()
+    w.setStyleSheet("background: transparent;")
+    layout = QVBoxLayout(w)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(2)
+    t = QLabel(title)
+    t.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 500; background: transparent;")
+    layout.addWidget(t)
+    if subtitle:
+        s = QLabel(subtitle)
+        s.setWordWrap(True)
+        s.setStyleSheet(f"color: {TEXT_SEC}; font-size: 11px; background: transparent;")
+        layout.addWidget(s)
+    return w
+
+def _settings_card() -> QFrame:
+    card = QFrame()
+    card.setStyleSheet(f"""
+        QFrame {{
+            background: {CARD};
+            border: 1px solid {BORDER};
+            border-radius: 12px;
+        }}
+    """)
+    return card
+
+def _save_btn() -> QPushButton:
+    btn = QPushButton("Save Changes")
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setFixedHeight(40)
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background: {ACCENT};
+            color: #1A1100;
+            border: none;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 0 24px;
+        }}
+        QPushButton:hover {{ background: {ACCENT_HOVER}; }}
+        QPushButton:pressed {{ background: #BF811A; }}
+    """)
+    return btn
+
+
+class SettingsPane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._current = 0
+        self._build()
+        self._load()
+
+    def _build(self):
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Sub-sidebar
+        sub = QWidget()
+        sub.setFixedWidth(180)
+        sub.setStyleSheet(f"background: {SURFACE}; border-right: 1px solid {BORDER};")
+        sub_layout = QVBoxLayout(sub)
+        sub_layout.setContentsMargins(12, 20, 12, 20)
+        sub_layout.setSpacing(2)
+
+        sec_lbl = _settings_label("SETTINGS")
+        sec_lbl.setContentsMargins(4, 0, 0, 8)
+        sub_layout.addWidget(sec_lbl)
+
+        self._sub_btns = []
+        for i, name in enumerate(SETTINGS_PAGES):
+            btn = QPushButton(name)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(34)
+            btn.clicked.connect(lambda _, idx=i: self._select(idx))
+            self._sub_btns.append(btn)
+            sub_layout.addWidget(btn)
+        sub_layout.addStretch()
+        root.addWidget(sub)
+
+        # Content stack
+        self._stack = QStackedWidget()
+        self._stack.setStyleSheet(f"background: {SURFACE};")
+        self._stack.addWidget(self._build_general())
+        self._stack.addWidget(self._build_blocking())
+        self._stack.addWidget(self._build_allowlists())
+        self._stack.addWidget(self._build_notifications())
+        self._stack.addWidget(self._build_advanced())
+        root.addWidget(self._stack)
+
+        self._select(0)
+
+    def _select(self, idx: int):
+        self._current = idx
+        self._stack.setCurrentIndex(idx)
+        for i, btn in enumerate(self._sub_btns):
+            if i == idx:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {ACCENT_MUTED};
+                        color: {TEXT};
+                        border: none;
+                        border-radius: 8px;
+                        text-align: left;
+                        padding-left: 12px;
+                        font-size: 13px;
+                        font-weight: 600;
+                    }}
+                """)
+            else:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent;
+                        color: {TEXT};
+                        border: none;
+                        border-radius: 8px;
+                        text-align: left;
+                        padding-left: 12px;
+                        font-size: 13px;
+                        font-weight: 400;
+                    }}
+                    QPushButton:hover {{ background: {CARD}; }}
+                """)
+
+    # ── General ───────────────────────────────────────────────────────────────
+
+    def _build_general(self) -> QWidget:
+        w = QScrollArea()
+        w.setWidgetResizable(True)
+        w.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {SURFACE};")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        t = QLabel("General")
+        t.setFont(serif(28))
+        t.setStyleSheet(f"font-family: 'Instrument Serif'; font-size: 28px; color: {TEXT}; background: transparent;")
+        layout.addWidget(t)
+        s = QLabel("Appearance and global preferences.")
+        s.setStyleSheet(f"color: {TEXT_SEC}; font-size: 13px; background: transparent;")
+        layout.addWidget(s)
+        layout.addSpacing(4)
+
+        # Appearance card
+        card = _settings_card()
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(20, 16, 20, 16)
+        cl.setSpacing(12)
+        cl.addWidget(_settings_label("APPEARANCE"))
+
+        # System / Light / Dark toggle
+        toggle_row = QHBoxLayout()
+        toggle_row.setSpacing(0)
+        self._appearance_btns = {}
+        for opt in ["System", "Light", "Dark"]:
+            btn = QPushButton(opt)
+            btn.setFixedHeight(30)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _, o=opt: self._set_appearance(o))
+            self._appearance_btns[opt] = btn
+            toggle_row.addWidget(btn)
+        self._update_appearance_toggle("System")
+        cl.addLayout(toggle_row)
+
+        # Accent colour row
+        accent_row = QFrame()
+        accent_row.setStyleSheet(f"background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px;")
+        ar = QHBoxLayout(accent_row)
+        ar.setContentsMargins(12, 10, 12, 10)
+        swatch = QLabel()
+        swatch.setFixedSize(32, 32)
+        swatch.setStyleSheet(f"background: {ACCENT}; border-radius: 6px; border: none;")
+        ar.addWidget(swatch)
+        ar.addWidget(_settings_row_label("Accent colour", "Warm amber -- fixed"))
+        ar.addStretch()
+        cl.addWidget(accent_row)
+        layout.addWidget(card)
+
+        btn = _save_btn()
+        btn.clicked.connect(self._save)
+        layout.addWidget(btn)
+        layout.addStretch()
+        w.setWidget(inner)
+        return w
+
+    def _set_appearance(self, opt: str):
+        self._update_appearance_toggle(opt)
+
+    def _update_appearance_toggle(self, active: str):
+        for opt, btn in self._appearance_btns.items():
+            if opt == active:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {SURFACE};
+                        color: {TEXT};
+                        border: 1px solid {BORDER};
+                        border-radius: 6px;
+                        font-size: 13px;
+                        font-weight: 600;
+                        padding: 0 16px;
+                    }}
+                """)
+            else:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {CARD};
+                        color: {TEXT_SEC};
+                        border: 1px solid {BORDER};
+                        border-radius: 6px;
+                        font-size: 13px;
+                        padding: 0 16px;
+                    }}
+                    QPushButton:hover {{ background: {SURFACE}; color: {TEXT}; }}
+                """)
+
+    # ── Blocking ──────────────────────────────────────────────────────────────
+
+    def _build_blocking(self) -> QWidget:
+        w = QScrollArea()
+        w.setWidgetResizable(True)
+        w.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {SURFACE};")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        t = QLabel("Blocking")
+        t.setFont(serif(28))
+        t.setStyleSheet(f"font-family: 'Instrument Serif'; font-size: 28px; color: {TEXT}; background: transparent;")
+        layout.addWidget(t)
+        s = QLabel("Timing, polling, and AI strictness.")
+        s.setStyleSheet(f"color: {TEXT_SEC}; font-size: 13px; background: transparent;")
+        layout.addWidget(s)
+        layout.addSpacing(4)
+
+        card = _settings_card()
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(20, 16, 20, 16)
+        cl.setSpacing(0)
+
+        fields = [
+            ("temporary_allow_minutes", "Temporary Allow Duration",
+             "How long a temporary override lasts before the site/app is re-blocked.", "min"),
+            ("schedule_refresh_minutes", "Schedule Refresh",
+             "How often Notion events are re-fetched in the background.", "min"),
+            ("url_poll_interval_seconds", "URL Poll Interval",
+             "How often browser tabs are checked for blocked domains.", "s"),
+            ("app_poll_interval_seconds", "App Poll Interval",
+             "How often running apps are checked against the blocklist.", "s"),
+        ]
+
+        self._blocking_inputs = {}
+        for i, (key, title, subtitle, unit) in enumerate(fields):
+            if i > 0:
+                div = QFrame()
+                div.setFrameShape(QFrame.Shape.HLine)
+                div.setFixedHeight(1)
+                div.setStyleSheet(f"background: {BORDER}; border: none;")
+                cl.addWidget(div)
+
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 12, 0, 12)
+            row.addWidget(_settings_row_label(title, subtitle), 1)
+            inp = QLineEdit()
+            inp.setFixedWidth(70)
+            inp.setFixedHeight(32)
+            inp.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            inp.setPlaceholderText("--")
+            self._blocking_inputs[key] = inp
+            unit_lbl = QLabel(unit)
+            unit_lbl.setStyleSheet(f"color: {TEXT_SEC}; font-size: 12px; background: transparent;")
+            row.addWidget(inp)
+            row.addWidget(unit_lbl)
+            cl.addLayout(row)
+
+        # Override code row
+        div = QFrame()
+        div.setFrameShape(QFrame.Shape.HLine)
+        div.setFixedHeight(1)
+        div.setStyleSheet(f"background: {BORDER}; border: none;")
+        cl.addWidget(div)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 12, 0, 12)
+        row.addWidget(_settings_row_label("Override Code", 'Typed to bypass the lock. Default is "bob".'), 1)
+        self._override_input = QLineEdit()
+        self._override_input.setFixedWidth(120)
+        self._override_input.setFixedHeight(32)
+        self._override_input.setEchoMode(QLineEdit.EchoMode.Password)
+        row.addWidget(self._override_input)
+        cl.addLayout(row)
+
+        # AI Harshness row
+        div2 = QFrame()
+        div2.setFrameShape(QFrame.Shape.HLine)
+        div2.setFixedHeight(1)
+        div2.setStyleSheet(f"background: {BORDER}; border: none;")
+        cl.addWidget(div2)
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 12, 0, 12)
+        row2.addWidget(_settings_row_label("AI Harshness", "How strictly the AI judges reasons."), 1)
+        toggle2 = QHBoxLayout()
+        toggle2.setSpacing(0)
+        self._harshness_btns = {}
+        for opt in ["Lenient", "Standard", "Strict"]:
+            btn = QPushButton(opt)
+            btn.setFixedHeight(30)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _, o=opt: self._set_harshness(o))
+            self._harshness_btns[opt] = btn
+            toggle2.addWidget(btn)
+        self._update_harshness_toggle("Standard")
+        row2.addLayout(toggle2)
+        cl.addLayout(row2)
+
+        layout.addWidget(card)
+        btn = _save_btn()
+        btn.clicked.connect(self._save)
+        layout.addWidget(btn)
+        layout.addStretch()
+        w.setWidget(inner)
+        return w
+
+    def _set_harshness(self, opt: str):
+        self._update_harshness_toggle(opt)
+
+    def _update_harshness_toggle(self, active: str):
+        for opt, btn in self._harshness_btns.items():
+            if opt == active:
+                btn.setStyleSheet(f"""QPushButton {{
+                    background: {SURFACE}; color: {TEXT};
+                    border: 1px solid {BORDER}; border-radius: 6px;
+                    font-size: 12px; font-weight: 600; padding: 0 12px;
+                }}""")
+            else:
+                btn.setStyleSheet(f"""QPushButton {{
+                    background: {CARD}; color: {TEXT_SEC};
+                    border: 1px solid {BORDER}; border-radius: 6px;
+                    font-size: 12px; padding: 0 12px;
+                }}
+                QPushButton:hover {{ background: {SURFACE}; color: {TEXT}; }}""")
+
+    # ── Allowlists ────────────────────────────────────────────────────────────
+
+    def _build_allowlists(self) -> QWidget:
+        w = QScrollArea()
+        w.setWidgetResizable(True)
+        w.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {SURFACE};")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        t = QLabel("Allowlists")
+        t.setFont(serif(28))
+        t.setStyleSheet(f"font-family: 'Instrument Serif'; font-size: 28px; color: {TEXT}; background: transparent;")
+        layout.addWidget(t)
+        s = QLabel("Always-allowed apps and domains, regardless of session.")
+        s.setStyleSheet(f"color: {TEXT_SEC}; font-size: 13px; background: transparent;")
+        layout.addWidget(s)
+        layout.addSpacing(4)
+
+        # Apps card
+        apps_card = _settings_card()
+        al = QVBoxLayout(apps_card)
+        al.setContentsMargins(20, 16, 20, 16)
+        al.setSpacing(10)
+        al.addWidget(_settings_label("ALWAYS-ALLOWED APPS"))
+        sub = QLabel("These apps are never blocked even outside the session whitelist.")
+        sub.setStyleSheet(f"color: {TEXT_SEC}; font-size: 11px; background: transparent;")
+        sub.setWordWrap(True)
+        al.addWidget(sub)
+        self._apps_tags = _TagEditor()
+        al.addWidget(self._apps_tags)
+        layout.addWidget(apps_card)
+
+        # Domains card
+        dom_card = _settings_card()
+        dl = QVBoxLayout(dom_card)
+        dl.setContentsMargins(20, 16, 20, 16)
+        dl.setSpacing(10)
+        dl.addWidget(_settings_label("ALWAYS-ALLOWED DOMAINS"))
+        sub2 = QLabel("These domains are never blocked in the browser.")
+        sub2.setStyleSheet(f"color: {TEXT_SEC}; font-size: 11px; background: transparent;")
+        sub2.setWordWrap(True)
+        dl.addWidget(sub2)
+        self._domains_tags = _TagEditor()
+        dl.addWidget(self._domains_tags)
+        layout.addWidget(dom_card)
+
+        btn = _save_btn()
+        btn.clicked.connect(self._save)
+        layout.addWidget(btn)
+        layout.addStretch()
+        w.setWidget(inner)
+        return w
+
+    # ── Notifications ─────────────────────────────────────────────────────────
+
+    def _build_notifications(self) -> QWidget:
+        w = QScrollArea()
+        w.setWidgetResizable(True)
+        w.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {SURFACE};")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        t = QLabel("Notifications")
+        t.setFont(serif(28))
+        t.setStyleSheet(f"font-family: 'Instrument Serif'; font-size: 28px; color: {TEXT}; background: transparent;")
+        layout.addWidget(t)
+        s = QLabel("Control what notifications Locus sends.")
+        s.setStyleSheet(f"color: {TEXT_SEC}; font-size: 13px; background: transparent;")
+        layout.addWidget(s)
+        layout.addSpacing(4)
+
+        card = _settings_card()
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(20, 16, 20, 16)
+        cl.setSpacing(0)
+
+        self._notif_toggles = {}
+        rows = [
+            ("show_notifications", "Show Notifications",
+             'Displays banners like "Evaluating your reason..." and "Override accepted".'),
+            ("play_sound_on_block", "Play Sound on Block",
+             "Plays a system sound when a block is triggered."),
+        ]
+        for i, (key, title, subtitle) in enumerate(rows):
+            if i > 0:
+                div = QFrame()
+                div.setFrameShape(QFrame.Shape.HLine)
+                div.setFixedHeight(1)
+                div.setStyleSheet(f"background: {BORDER}; border: none;")
+                cl.addWidget(div)
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 12, 0, 12)
+            row.addWidget(_settings_row_label(title, subtitle), 1)
+            toggle = _Toggle()
+            self._notif_toggles[key] = toggle
+            row.addWidget(toggle)
+            cl.addLayout(row)
+
+        layout.addWidget(card)
+        btn = _save_btn()
+        btn.clicked.connect(self._save)
+        layout.addWidget(btn)
+        layout.addStretch()
+        w.setWidget(inner)
+        return w
+
+    # ── Advanced ──────────────────────────────────────────────────────────────
+
+    def _build_advanced(self) -> QWidget:
+        w = QScrollArea()
+        w.setWidgetResizable(True)
+        w.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {SURFACE};")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        t = QLabel("Advanced")
+        t.setFont(serif(28))
+        t.setStyleSheet(f"font-family: 'Instrument Serif'; font-size: 28px; color: {TEXT}; background: transparent;")
+        layout.addWidget(t)
+        s = QLabel("AI prompt overrides, polling, and debug options.")
+        s.setStyleSheet(f"color: {TEXT_SEC}; font-size: 13px; background: transparent;")
+        layout.addWidget(s)
+        layout.addSpacing(4)
+
+        # Debug logging toggle
+        card = _settings_card()
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(20, 16, 20, 16)
+        row = QHBoxLayout()
+        row.addWidget(_settings_row_label("Debug Logging",
+                      "Enables verbose print output in the Python backend."), 1)
+        self._debug_toggle = _Toggle()
+        row.addWidget(self._debug_toggle)
+        cl.addLayout(row)
+        layout.addWidget(card)
+
+        # Prompt overrides
+        prompts = [
+            ("evaluate_reason", "Evaluate Reason Prompt",
+             "Used when the user submits a justification for a blocked site/app.",
+             "Placeholders: {session_name}, {subject_type}, {subject}, {reason}"),
+            ("evaluate_site_relevance", "Evaluate Site Relevance Prompt",
+             "Used to pre-screen whether a blocked domain is obviously relevant.",
+             "Placeholders: {session_name}, {domain}, {title_hint}"),
+        ]
+        self._prompt_inputs = {}
+        for key, title, subtitle, placeholder in prompts:
+            pcard = _settings_card()
+            pl = QVBoxLayout(pcard)
+            pl.setContentsMargins(20, 16, 20, 16)
+            pl.setSpacing(8)
+            pl.addWidget(_settings_row_label(title, subtitle))
+            hint = QLabel(placeholder)
+            hint.setStyleSheet(f"color: {TEXT_LIGHT}; font-size: 10px; font-family: 'DM Mono'; background: transparent;")
+            pl.addWidget(hint)
+            from PyQt6.QtWidgets import QTextEdit
+            ta = QTextEdit()
+            ta.setFixedHeight(90)
+            ta.setPlaceholderText("Leave empty to use the default prompt.")
+            ta.setStyleSheet(f"""
+                QTextEdit {{
+                    background: {SURFACE};
+                    border: 1px solid {BORDER};
+                    border-radius: 8px;
+                    padding: 8px;
+                    color: {TEXT};
+                    font-size: 12px;
+                    font-family: 'DM Mono', 'Consolas', monospace;
+                }}
+                QTextEdit:focus {{ border-color: {ACCENT}; }}
+            """)
+            self._prompt_inputs[key] = ta
+            pl.addWidget(ta)
+            layout.addWidget(pcard)
+
+        btn = _save_btn()
+        btn.clicked.connect(self._save)
+        layout.addWidget(btn)
+        layout.addStretch()
+        w.setWidget(inner)
+        return w
+
+    # ── Load / Save ───────────────────────────────────────────────────────────
+
+    def _load(self):
+        try:
+            with open(CONFIG_PATH) as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+
+        for key, inp in self._blocking_inputs.items():
+            val = cfg.get(key, "")
+            inp.setText(str(val) if val != "" else "")
+
+        self._override_input.setText(cfg.get("override_code", ""))
+
+        harshness = cfg.get("harshness", "Standard")
+        if harshness in self._harshness_btns:
+            self._update_harshness_toggle(harshness)
+
+        self._apps_tags.set_items(cfg.get("always_allowed_apps", []))
+        self._domains_tags.set_items(cfg.get("always_allowed_domains", []))
+
+        for key, toggle in self._notif_toggles.items():
+            toggle.set_checked(bool(cfg.get(key, False)))
+
+        self._debug_toggle.set_checked(bool(cfg.get("debug_logging", False)))
+
+        prompts = cfg.get("prompts", {})
+        for key, ta in self._prompt_inputs.items():
+            ta.setPlainText(prompts.get(key, ""))
+
+    def _save(self):
+        try:
+            with open(CONFIG_PATH) as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+
+        for key, inp in self._blocking_inputs.items():
+            txt = inp.text().strip()
+            if txt:
+                try:
+                    cfg[key] = float(txt) if "." in txt else int(txt)
+                except ValueError:
+                    pass
+
+        oc = self._override_input.text().strip()
+        if oc:
+            cfg["override_code"] = oc
+
+        for opt, btn in self._harshness_btns.items():
+            # find which one is selected by checking font-weight in stylesheet
+            if "font-weight: 600" in btn.styleSheet():
+                cfg["harshness"] = opt
+                break
+
+        cfg["always_allowed_apps"] = self._apps_tags.get_items()
+        cfg["always_allowed_domains"] = self._domains_tags.get_items()
+
+        for key, toggle in self._notif_toggles.items():
+            cfg[key] = toggle.is_checked()
+
+        cfg["debug_logging"] = self._debug_toggle.is_checked()
+
+        if "prompts" not in cfg:
+            cfg["prompts"] = {}
+        for key, ta in self._prompt_inputs.items():
+            cfg["prompts"][key] = ta.toPlainText().strip()
+
+        tmp = CONFIG_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp, CONFIG_PATH)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(SURFACE))
+        p.end()
+
+
+# ── Toggle widget ─────────────────────────────────────────────────────────────
+
+class _Toggle(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._checked = False
+        self.setFixedSize(44, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_checked(self, v: bool):
+        self._checked = v
+        self.update()
+
+    def is_checked(self) -> bool:
+        return self._checked
+
+    def mousePressEvent(self, event):
+        self._checked = not self._checked
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        track_color = QColor(ACCENT) if self._checked else QColor(BORDER)
+        p.setBrush(QBrush(track_color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(0, 4, 44, 16, 8, 8)
+        knob_x = 22 if self._checked else 2
+        p.setBrush(QBrush(QColor("white")))
+        p.drawEllipse(knob_x, 2, 20, 20)
+        p.end()
+
+
+# ── Tag editor widget ─────────────────────────────────────────────────────────
+
+class _TagEditor(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._items = []
+        self._layout = None
+        self._build()
+
+    def _build(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+
+        self._tags_widget = QWidget()
+        self._tags_widget.setStyleSheet("background: transparent;")
+        self._tags_layout = QHBoxLayout(self._tags_widget)
+        self._tags_layout.setContentsMargins(0, 0, 0, 0)
+        self._tags_layout.setSpacing(6)
+        self._tags_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        outer.addWidget(self._tags_widget)
+
+        add_row = QHBoxLayout()
+        self._add_input = QLineEdit()
+        self._add_input.setPlaceholderText("Add...")
+        self._add_input.setFixedHeight(30)
+        self._add_input.returnPressed.connect(self._add_current)
+        add_row.addWidget(self._add_input)
+        add_btn = QPushButton("+")
+        add_btn.setFixedSize(30, 30)
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {ACCENT}; color: #1A1100;
+                border: none; border-radius: 6px;
+                font-size: 16px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {ACCENT_HOVER}; }}
+        """)
+        add_btn.clicked.connect(self._add_current)
+        add_row.addWidget(add_btn)
+        outer.addLayout(add_row)
+
+    def _refresh_tags(self):
+        while self._tags_layout.count():
+            item = self._tags_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for item in self._items:
+            tag = QWidget()
+            tag.setStyleSheet(f"background: {CARD}; border: 1px solid {BORDER}; border-radius: 6px;")
+            tl = QHBoxLayout(tag)
+            tl.setContentsMargins(8, 3, 4, 3)
+            tl.setSpacing(4)
+            lbl = QLabel(item)
+            lbl.setStyleSheet(f"color: {TEXT}; font-size: 12px; background: transparent; border: none;")
+            tl.addWidget(lbl)
+            x = QPushButton("×")
+            x.setFixedSize(16, 16)
+            x.setCursor(Qt.CursorShape.PointingHandCursor)
+            x.setStyleSheet(f"background: transparent; color: {TEXT_SEC}; border: none; font-size: 13px; padding: 0;")
+            x.clicked.connect(lambda _, i=item: self._remove(i))
+            tl.addWidget(x)
+            self._tags_layout.addWidget(tag)
+
+    def _add_current(self):
+        val = self._add_input.text().strip()
+        if val and val not in self._items:
+            self._items.append(val)
+            self._refresh_tags()
+        self._add_input.clear()
+
+    def _remove(self, item: str):
+        if item in self._items:
+            self._items.remove(item)
+            self._refresh_tags()
+
+    def set_items(self, items: list):
+        self._items = list(items)
+        self._refresh_tags()
+
+    def get_items(self) -> list:
+        return list(self._items)
+
 
 # ── Main window ───────────────────────────────────────────────────────────────
 
