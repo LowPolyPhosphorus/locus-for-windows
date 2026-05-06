@@ -966,9 +966,14 @@ class LauncherPane(QWidget):
 
         self._populate_events()
 
-    def set_left_offset(self, sidebar_width: int):
-        """Add left padding equal to sidebar width so content stays window-centered."""
-        self._scroll_inner.setContentsMargins(sidebar_width + 32, 32, 32, 32)
+    def set_sidebar_width(self, sidebar_w: int):
+        """Keep content centered relative to full window by accounting for sidebar."""
+        # The launcher spans the full window. To center content in the visible
+        # area (right of sidebar), we add left padding = sidebar_w and equal
+        # right padding. But to center in the FULL window, we just use equal
+        # margins -- the sidebar floats on top so we only need enough left
+        # padding to clear the sidebar visually.
+        self._scroll_inner.setContentsMargins(sidebar_w + 16, 32, 16, 32)
 
     def _start_custom(self):
         title = self._custom_input.text().strip()
@@ -1006,6 +1011,8 @@ class PlaceholderPane(QWidget):
 
 # ── Main window ───────────────────────────────────────────────────────────────
 
+# ── Main window ───────────────────────────────────────────────────────────────
+
 class LocusWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -1016,64 +1023,86 @@ class LocusWindow(QWidget):
         self.setStyleSheet(STYLESHEET)
         self._build()
 
-        # Poll sidebar width every 16ms during animation to keep launcher centered
-        self._center_timer = QTimer()
-        self._center_timer.setInterval(16)
-        self._center_timer.timeout.connect(self._sync_launcher_margin)
-
     def _build(self):
-        root = QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        # Root is a plain widget -- we position children manually so the
+        # launcher can span the full window width regardless of sidebar size.
+        self.setLayout(None)
 
-        self._sidebar = Sidebar()
+        # Sidebar sits on the left, normal flow via move/resize in resizeEvent
+        self._sidebar = Sidebar(self)
         self._sidebar.page_changed.connect(self._switch_page)
         self._sidebar.sidebar_toggled.connect(self._on_sidebar_toggled)
-        root.addWidget(self._sidebar)
 
-        self._stack = QStackedWidget()
-        self._stack.setStyleSheet(f"background: {SURFACE};")
-
-        self._launcher = LauncherPane()
-        self._stack.addWidget(self._launcher)                          # 0
-
-        self._stack.addWidget(PlaceholderPane(                         # 1
+        # Stack for non-launcher panes (Connectors, Analytics, Settings)
+        # These sit to the right of the sidebar as normal
+        self._other_stack = QStackedWidget(self)
+        self._other_stack.setStyleSheet(f"background: {SURFACE};")
+        self._other_stack.addWidget(PlaceholderPane(                   # 0
             "Connectors",
             "Connect Notion or paste a calendar URL (Google Calendar, Apple Calendar, Schoology) "
             "to pull upcoming assignments."
         ))
-        self._stack.addWidget(PlaceholderPane(                         # 2
+        self._other_stack.addWidget(PlaceholderPane(                   # 1
             "Analytics",
             "View your focus stats -- total time, sessions, most blocked apps and sites."
         ))
-        self._stack.addWidget(PlaceholderPane(                         # 3
+        self._other_stack.addWidget(PlaceholderPane(                   # 2
             "Settings",
             "Configure blocking behavior, override code, notification preferences, and appearance."
         ))
 
-        root.addWidget(self._stack)
+        # Launcher spans the FULL window width so centering is always relative
+        # to the window, not the content panel. It paints over the sidebar area
+        # but the sidebar is raised on top.
+        self._launcher = LauncherPane(self)
+
+        self._current_page = 0  # 0 = launcher
+        self._other_stack.hide()
+
+        # Raise sidebar so it draws on top of the launcher background
+        self._sidebar.raise_()
+
+        self._do_layout()
+
+    def _do_layout(self):
+        """Position all children to fill the window correctly."""
+        w, h = self.width(), self.height()
+        sw = self._sidebar.width() if self._sidebar.width() > 0 else SIDEBAR_EXPANDED
+
+        self._sidebar.setGeometry(0, 0, sw, h)
+
+        # Launcher always spans full window -- sidebar floats on top
+        self._launcher.setGeometry(0, 0, w, h)
+        # Give launcher an inner left margin so content isn't hidden behind sidebar
+        self._launcher.set_sidebar_width(sw)
+
+        # Other panes sit in the remaining space to the right of sidebar
+        self._other_stack.setGeometry(sw, 0, w - sw, h)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._do_layout()
 
     def _on_sidebar_toggled(self, collapsing: bool):
-        """Start polling to keep launcher centered during animation."""
-        self._sidebar_collapsing = collapsing
-        self._center_timer.start()
-        # Stop after animation duration + a small buffer
-        QTimer.singleShot(220, self._center_timer.stop)
-
-    def _sync_launcher_margin(self):
-        """Compensate launcher left margin so content stays visually centered."""
-        if self._stack.currentIndex() != 0:
-            return
-        sidebar_w = self._sidebar.width()
-        # Extra left margin = sidebar_width so the content panel's center
-        # aligns with the full window center
-        self._launcher.set_left_offset(sidebar_w)
+        # Poll geometry during animation
+        self._layout_timer = QTimer(self)
+        self._layout_timer.setInterval(8)
+        self._layout_timer.timeout.connect(self._do_layout)
+        self._layout_timer.start()
+        QTimer.singleShot(220, self._layout_timer.stop)
 
     def _switch_page(self, idx: int):
-        self._stack.setCurrentIndex(idx)
+        # idx: 0=Start, 1=Connectors, 2=Analytics, 3=Settings
+        self._current_page = idx
         if idx == 0:
-            # Reset offset to current sidebar width
-            self._launcher.set_left_offset(self._sidebar.width())
+            self._launcher.show()
+            self._other_stack.hide()
+        else:
+            self._launcher.hide()
+            self._other_stack.setCurrentIndex(idx - 1)
+            self._other_stack.show()
+        self._do_layout()
+        self._sidebar.raise_()
 
     def update_state(self, state: dict):
         self._launcher.update_state(state)
