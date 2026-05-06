@@ -1024,18 +1024,22 @@ class LocusWindow(QWidget):
         self._build()
 
     def _build(self):
-        # Root is a plain widget -- we position children manually so the
-        # launcher can span the full window width regardless of sidebar size.
-        self.setLayout(None)
+        # Use a zero-margin layout with a single full-size container
+        # so we can manually position children inside it
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Sidebar sits on the left, normal flow via move/resize in resizeEvent
-        self._sidebar = Sidebar(self)
-        self._sidebar.page_changed.connect(self._switch_page)
-        self._sidebar.sidebar_toggled.connect(self._on_sidebar_toggled)
+        # Container fills the whole window -- children positioned manually
+        self._container = QWidget()
+        self._container.setStyleSheet(f"background: {SURFACE};")
+        root.addWidget(self._container)
 
-        # Stack for non-launcher panes (Connectors, Analytics, Settings)
-        # These sit to the right of the sidebar as normal
-        self._other_stack = QStackedWidget(self)
+        # Launcher spans full container width -- sidebar floats on top
+        self._launcher = LauncherPane(self._container)
+
+        # Other panes sit to the right of the sidebar
+        self._other_stack = QStackedWidget(self._container)
         self._other_stack.setStyleSheet(f"background: {SURFACE};")
         self._other_stack.addWidget(PlaceholderPane(                   # 0
             "Connectors",
@@ -1050,41 +1054,42 @@ class LocusWindow(QWidget):
             "Settings",
             "Configure blocking behavior, override code, notification preferences, and appearance."
         ))
-
-        # Launcher spans the FULL window width so centering is always relative
-        # to the window, not the content panel. It paints over the sidebar area
-        # but the sidebar is raised on top.
-        self._launcher = LauncherPane(self)
-
-        self._current_page = 0  # 0 = launcher
         self._other_stack.hide()
 
-        # Raise sidebar so it draws on top of the launcher background
+        # Sidebar floats on top of everything
+        self._sidebar = Sidebar(self._container)
+        self._sidebar.page_changed.connect(self._switch_page)
+        self._sidebar.sidebar_toggled.connect(self._on_sidebar_toggled)
         self._sidebar.raise_()
 
+        self._current_page = 0
         self._do_layout()
 
     def _do_layout(self):
-        """Position all children to fill the window correctly."""
-        w, h = self.width(), self.height()
+        w = self._container.width()
+        h = self._container.height()
         sw = self._sidebar.width() if self._sidebar.width() > 0 else SIDEBAR_EXPANDED
 
+        # Sidebar always on left
         self._sidebar.setGeometry(0, 0, sw, h)
 
-        # Launcher always spans full window -- sidebar floats on top
+        # Launcher always full size -- content padding handles sidebar clearance
         self._launcher.setGeometry(0, 0, w, h)
-        # Give launcher an inner left margin so content isn't hidden behind sidebar
         self._launcher.set_sidebar_width(sw)
 
-        # Other panes sit in the remaining space to the right of sidebar
-        self._other_stack.setGeometry(sw, 0, w - sw, h)
+        # Other panes fill remaining space to the right
+        self._other_stack.setGeometry(sw, 0, max(0, w - sw), h)
+
+        self._sidebar.raise_()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._do_layout()
+        # Container size updates automatically via layout, then we fix children
+        QTimer.singleShot(0, self._do_layout)
 
     def _on_sidebar_toggled(self, collapsing: bool):
-        # Poll geometry during animation
+        if hasattr(self, "_layout_timer") and self._layout_timer.isActive():
+            self._layout_timer.stop()
         self._layout_timer = QTimer(self)
         self._layout_timer.setInterval(8)
         self._layout_timer.timeout.connect(self._do_layout)
@@ -1092,7 +1097,6 @@ class LocusWindow(QWidget):
         QTimer.singleShot(220, self._layout_timer.stop)
 
     def _switch_page(self, idx: int):
-        # idx: 0=Start, 1=Connectors, 2=Analytics, 3=Settings
         self._current_page = idx
         if idx == 0:
             self._launcher.show()
