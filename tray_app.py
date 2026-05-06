@@ -535,7 +535,7 @@ class Sidebar(QWidget):
 
         self._title_lbl = QLabel("Locus")
         self._title_lbl.setFont(serif(20))
-        self._title_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
+        self._title_lbl.setStyleSheet(f"font-family: 'Instrument Serif'; font-size: 20px; color: {TEXT}; background: transparent;")
         hl.addWidget(self._title_lbl)
         hl.addStretch()
         layout.addWidget(hdr)
@@ -674,7 +674,7 @@ class LauncherPane(QWidget):
         self._title_lbl = QLabel("Locus")
         self._title_lbl.setFont(serif(38))
         self._title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
+        self._title_lbl.setStyleSheet(f"font-family: 'Instrument Serif'; font-size: 38px; color: {TEXT}; background: transparent;")
         layout.addWidget(self._title_lbl)
         layout.addSpacing(4)
 
