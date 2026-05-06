@@ -146,20 +146,12 @@ def _load_fonts():
 
 
 def serif(size: int) -> QFont:
-    f = QFont("Instrument Serif")
-    if not f.exactMatch():
-        f = QFont("Georgia")
-    f.setPointSize(size)
+    f = QFont("Instrument Serif", size)
     return f
 
 
 def mono(size: int, medium: bool = False) -> QFont:
-    f = QFont("DM Mono")
-    if not f.exactMatch():
-        f = QFont("Consolas")
-    f.setPointSize(size)
-    if medium:
-        f.setWeight(QFont.Weight.Medium)
+    f = QFont("DM Mono" if not medium else "DM Mono Medium", size)
     return f
 
 
