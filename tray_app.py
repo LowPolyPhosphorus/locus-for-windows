@@ -507,6 +507,7 @@ PAGES = [
 
 class Sidebar(QWidget):
     page_changed = pyqtSignal(int)
+    sidebar_toggled = pyqtSignal(bool)  # True = collapsing, False = expanding
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -567,6 +568,8 @@ class Sidebar(QWidget):
         self._collapsed = not self._collapsed
         target = SIDEBAR_COLLAPSED if self._collapsed else SIDEBAR_EXPANDED
 
+        self.sidebar_toggled.emit(self._collapsed)
+
         for anim in (self._anim, self._anim2):
             anim.stop()
             anim.setStartValue(self.width())
@@ -574,11 +577,10 @@ class Sidebar(QWidget):
             anim.start()
 
         if self._collapsed:
+            # Hide text title only -- lock icon stays visible
             self._title_lbl.hide()
-            self._lock_lbl.hide()
         else:
             self._title_lbl.show()
-            self._lock_lbl.show()
 
         for row in self._rows:
             row.set_collapsed(self._collapsed)
@@ -657,6 +659,7 @@ class LauncherPane(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         inner = QWidget()
+        self._scroll_inner = inner
         inner.setStyleSheet(f"background: {SURFACE};")
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(32, 32, 32, 32)
@@ -963,6 +966,10 @@ class LauncherPane(QWidget):
 
         self._populate_events()
 
+    def set_left_offset(self, sidebar_width: int):
+        """Add left padding equal to sidebar width so content stays window-centered."""
+        self._scroll_inner.setContentsMargins(sidebar_width + 32, 32, 32, 32)
+
     def _start_custom(self):
         title = self._custom_input.text().strip()
         if title:
@@ -1009,6 +1016,11 @@ class LocusWindow(QWidget):
         self.setStyleSheet(STYLESHEET)
         self._build()
 
+        # Poll sidebar width every 16ms during animation to keep launcher centered
+        self._center_timer = QTimer()
+        self._center_timer.setInterval(16)
+        self._center_timer.timeout.connect(self._sync_launcher_margin)
+
     def _build(self):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1016,6 +1028,7 @@ class LocusWindow(QWidget):
 
         self._sidebar = Sidebar()
         self._sidebar.page_changed.connect(self._switch_page)
+        self._sidebar.sidebar_toggled.connect(self._on_sidebar_toggled)
         root.addWidget(self._sidebar)
 
         self._stack = QStackedWidget()
@@ -1040,8 +1053,27 @@ class LocusWindow(QWidget):
 
         root.addWidget(self._stack)
 
+    def _on_sidebar_toggled(self, collapsing: bool):
+        """Start polling to keep launcher centered during animation."""
+        self._sidebar_collapsing = collapsing
+        self._center_timer.start()
+        # Stop after animation duration + a small buffer
+        QTimer.singleShot(220, self._center_timer.stop)
+
+    def _sync_launcher_margin(self):
+        """Compensate launcher left margin so content stays visually centered."""
+        if self._stack.currentIndex() != 0:
+            return
+        sidebar_w = self._sidebar.width()
+        # Extra left margin = sidebar_width so the content panel's center
+        # aligns with the full window center
+        self._launcher.set_left_offset(sidebar_w)
+
     def _switch_page(self, idx: int):
         self._stack.setCurrentIndex(idx)
+        if idx == 0:
+            # Reset offset to current sidebar width
+            self._launcher.set_left_offset(self._sidebar.width())
 
     def update_state(self, state: dict):
         self._launcher.update_state(state)
