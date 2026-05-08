@@ -33,17 +33,10 @@ from PyQt6.QtCore import (
 from focuslock.paths import STATE_PATH, COMMAND_PATH, CONFIG_PATH
 
 
-# ── Theme (light only) ────────────────────────────────────────────────────────
+# ── Theme ─────────────────────────────────────────────────────────────────────
 
 ACCENT        = "#E8A020"
 ACCENT_HOVER  = "#D4901A"
-ACCENT_MUTED  = "#FDF3E0"
-SURFACE       = "#FDFAF5"
-CARD          = "#F7F2E8"
-BORDER        = "#E8DFC8"
-TEXT          = "#1A1409"
-TEXT_SEC      = "#7A6A4A"
-TEXT_LIGHT    = "#B0A080"
 
 # Tag colors matching the Swift app
 TAG_COLORS = {
@@ -61,6 +54,60 @@ TAG_COLORS = {
     "default":  ("#6B7280", "#F3F4F6"),
 }
 
+_DARK = False
+
+def _init_theme():
+    global SURFACE, CARD, BORDER, TEXT, TEXT_SEC, TEXT_LIGHT, ACCENT_MUTED
+    global SIDEBAR_BG, SETTINGS_SIDEBAR_BG
+    if _DARK:
+        SURFACE           = "#151209"
+        CARD              = "#201c12"
+        BORDER            = "#FFFFFF14"
+        TEXT              = "#F0E6CC"
+        TEXT_SEC          = "#8A7A5A"
+        TEXT_LIGHT        = "#5A4A2A"
+        ACCENT_MUTED      = "#3A2E10"
+        SIDEBAR_BG        = "#1a1610"
+        SETTINGS_SIDEBAR_BG = "#201c12"
+    else:
+        SURFACE           = "#FDFAF5"
+        CARD              = "#F7F2E8"
+        BORDER            = "#E8DFC8"
+        TEXT              = "#1A1409"
+        TEXT_SEC          = "#7A6A4A"
+        TEXT_LIGHT        = "#B0A080"
+        ACCENT_MUTED      = "#FDF3E0"
+        SIDEBAR_BG        = "#F7F2E8"
+        SETTINGS_SIDEBAR_BG = "#F0EBD8"
+
+_init_theme()
+
+def _is_system_dark() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        ) as k:
+            val, _ = winreg.QueryValueEx(k, "AppsUseLightTheme")
+            return val == 0
+    except Exception:
+        return False
+
+def set_dark_mode(dark: bool):
+    global _DARK
+    _DARK = dark
+    _init_theme()
+    _rebuild_stylesheet()
+
+# Forward declaration -- rebuilt after stylesheet is defined
+_APP_REF = None
+
+def _rebuild_stylesheet():
+    if _APP_REF:
+        _APP_REF.setStyleSheet(_make_stylesheet())
+
+
 def _tag_colors(class_name: str):
     key = class_name.lower().strip()
     for k, v in TAG_COLORS.items():
@@ -69,7 +116,8 @@ def _tag_colors(class_name: str):
     return TAG_COLORS["default"]
 
 
-STYLESHEET = f"""
+def _make_stylesheet() -> str:
+    return f"""
 QWidget {{
     background-color: {SURFACE};
     color: {TEXT};
@@ -78,7 +126,7 @@ QWidget {{
     border: none;
     outline: none;
 }}
-QLabel {{ background: transparent; color: {TEXT}; }}
+QLabel {{ background: transparent; color: {TEXT}; border: none; }}
 QLineEdit {{
     background: {SURFACE};
     border: 1px solid {BORDER};
@@ -121,6 +169,8 @@ QMenu::item {{ padding: 7px 16px; border-radius: 6px; color: {TEXT}; }}
 QMenu::item:selected {{ background: {ACCENT_MUTED}; color: {TEXT}; }}
 QMenu::separator {{ background: {BORDER}; height: 1px; margin: 4px 10px; }}
 """
+
+STYLESHEET = _make_stylesheet()
 
 
 # ── Font helpers ──────────────────────────────────────────────────────────────
@@ -586,7 +636,7 @@ class Sidebar(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(CARD))  # cream, slightly darker than surface
+        p.fillRect(self.rect(), QColor(SIDEBAR_BG))
         p.setPen(QPen(QColor(BORDER), 1))
         p.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
         p.end()
@@ -1028,6 +1078,25 @@ def _settings_card() -> QFrame:
             border: 1px solid {BORDER};
             border-radius: 12px;
         }}
+        QFrame QLineEdit {{
+            background: {SURFACE};
+            border: none;
+            border-radius: 6px;
+            padding: 4px 8px;
+            color: {TEXT};
+            font-size: 13px;
+        }}
+        QFrame QLineEdit:focus {{
+            border: 1px solid {ACCENT};
+        }}
+        QFrame QLabel {{
+            border: none;
+            background: transparent;
+        }}
+        QFrame QWidget {{
+            background: transparent;
+            border: none;
+        }}
     """)
     return card
 
@@ -1066,7 +1135,7 @@ class SettingsPane(QWidget):
         # Sub-sidebar
         sub = QWidget()
         sub.setFixedWidth(180)
-        sub.setStyleSheet(f"background: {SURFACE}; border-right: 1px solid {BORDER};")
+        sub.setStyleSheet(f"background: {SETTINGS_SIDEBAR_BG}; border-right: 1px solid {BORDER};")
         sub_layout = QVBoxLayout(sub)
         sub_layout.setContentsMargins(12, 20, 12, 20)
         sub_layout.setSpacing(2)
@@ -1175,7 +1244,7 @@ class SettingsPane(QWidget):
 
         # Accent colour row
         accent_row = QFrame()
-        accent_row.setStyleSheet(f"background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px;")
+        accent_row.setStyleSheet(f"background: {SURFACE}; border-radius: 8px; border: none;")
         ar = QHBoxLayout(accent_row)
         ar.setContentsMargins(12, 10, 12, 10)
         swatch = QLabel()
@@ -1196,6 +1265,12 @@ class SettingsPane(QWidget):
 
     def _set_appearance(self, opt: str):
         self._update_appearance_toggle(opt)
+        if opt == "Dark":
+            set_dark_mode(True)
+        elif opt == "Light":
+            set_dark_mode(False)
+        else:  # System
+            set_dark_mode(_is_system_dark())
 
     def _update_appearance_toggle(self, active: str):
         for opt, btn in self._appearance_btns.items():
@@ -1934,12 +2009,19 @@ class LocusTrayApp(QSystemTrayIcon):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
+    global _APP_REF
     app = QApplication(sys.argv)
+    _APP_REF = app
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Locus")
 
     _load_fonts()
-    app.setStyleSheet(STYLESHEET)
+
+    # Auto-detect system dark mode
+    if _is_system_dark():
+        set_dark_mode(True)
+
+    app.setStyleSheet(_make_stylesheet())
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         print("[Locus] System tray not available.")
