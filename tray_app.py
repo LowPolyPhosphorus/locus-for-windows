@@ -60,24 +60,24 @@ def _init_theme():
     global SURFACE, CARD, BORDER, TEXT, TEXT_SEC, TEXT_LIGHT, ACCENT_MUTED
     global SIDEBAR_BG, SETTINGS_SIDEBAR_BG
     if _DARK:
-        SURFACE           = "#151209"
-        CARD              = "#201c12"
-        BORDER            = "#FFFFFF14"
-        TEXT              = "#F0E6CC"
-        TEXT_SEC          = "#8A7A5A"
-        TEXT_LIGHT        = "#5A4A2A"
-        ACCENT_MUTED      = "#3A2E10"
-        SIDEBAR_BG        = "#1a1610"
+        SURFACE             = "#151209"
+        CARD                = "#201c12"
+        BORDER              = "#2f2b26"
+        TEXT                = "#F0E6CC"
+        TEXT_SEC            = "#8A7A5A"
+        TEXT_LIGHT          = "#5A4A2A"
+        ACCENT_MUTED        = "#2e2610"
+        SIDEBAR_BG          = "#1a1610"
         SETTINGS_SIDEBAR_BG = "#201c12"
     else:
-        SURFACE           = "#FDFAF5"
-        CARD              = "#F7F2E8"
-        BORDER            = "#E8DFC8"
-        TEXT              = "#1A1409"
-        TEXT_SEC          = "#7A6A4A"
-        TEXT_LIGHT        = "#B0A080"
-        ACCENT_MUTED      = "#FDF3E0"
-        SIDEBAR_BG        = "#F7F2E8"
+        SURFACE             = "#FDFAF5"
+        CARD                = "#F7F2E8"
+        BORDER              = "#2f2b26"
+        TEXT                = "#1A1409"
+        TEXT_SEC            = "#7A6A4A"
+        TEXT_LIGHT          = "#B0A080"
+        ACCENT_MUTED        = "#FDF3E0"
+        SIDEBAR_BG          = "#F7F2E8"
         SETTINGS_SIDEBAR_BG = "#F0EBD8"
 
 _init_theme()
@@ -98,14 +98,14 @@ def set_dark_mode(dark: bool):
     global _DARK
     _DARK = dark
     _init_theme()
-    _rebuild_stylesheet()
-
-# Forward declaration -- rebuilt after stylesheet is defined
-_APP_REF = None
-
-def _rebuild_stylesheet():
     if _APP_REF:
         _APP_REF.setStyleSheet(_make_stylesheet())
+    # Rebuild any open window so inline stylesheets pick up new colors
+    if _WINDOW_REF:
+        _WINDOW_REF.rebuild_styles()
+
+_APP_REF = None
+_WINDOW_REF = None
 
 
 def _tag_colors(class_name: str):
@@ -310,24 +310,30 @@ def _nav_icon(name: str, size: int, color: str) -> QPixmap:
             p.drawPath(path)
 
     elif name == "settings":
-        # Gear
+        import math
         outer_r = size * 0.36
-        inner_r = size * 0.22
+        inner_r = size * 0.21
         teeth = 8
         cx2, cy2 = size / 2, size / 2
         p.setBrush(QBrush(c))
         p.setPen(Qt.PenStyle.NoPen)
         gear = QPainterPath()
+        first = True
         for i in range(teeth * 2):
             angle = i * math.pi / teeth
-            r = outer_r if i % 2 == 0 else outer_r * 0.78
-            gear.lineTo(cx2 + math.cos(angle) * r, cy2 + math.sin(angle) * r)
+            r = outer_r if i % 2 == 0 else outer_r * 0.75
+            px2 = cx2 + math.cos(angle) * r
+            py2 = cy2 + math.sin(angle) * r
+            if first:
+                gear.moveTo(px2, py2)
+                first = False
+            else:
+                gear.lineTo(px2, py2)
         gear.closeSubpath()
         p.drawPath(gear)
-        # Center hole
         hole = QPainterPath()
         hole.addEllipse(QRectF(cx2 - inner_r, cy2 - inner_r, inner_r*2, inner_r*2))
-        p.setBrush(QBrush(QColor(SURFACE)))
+        p.setBrush(QBrush(QColor(SIDEBAR_BG)))
         p.drawPath(hole)
 
     p.end()
@@ -1828,8 +1834,26 @@ class LocusWindow(QWidget):
         self.setMinimumSize(680, 500)
         self.resize(720, 540)
         self.setWindowFlag(Qt.WindowType.Window)
-        self.setStyleSheet(STYLESHEET)
+        self.setStyleSheet(_make_stylesheet())
         self._build()
+
+    def rebuild_styles(self):
+        """Called when dark/light mode changes -- rebuilds all inline styles."""
+        self.setStyleSheet(_make_stylesheet())
+        self._container.setStyleSheet(f"background: {SURFACE};")
+        self._other_stack.setStyleSheet(f"background: {SURFACE};")
+        self._sidebar.update()
+        # Rebuild panes that have inline styles
+        idx = self._other_stack.currentIndex()
+        # Replace SettingsPane with a fresh one so its inline colors update
+        old = self._other_stack.widget(2)
+        new_settings = SettingsPane()
+        self._other_stack.removeWidget(old)
+        old.deleteLater()
+        self._other_stack.insertWidget(2, new_settings)
+        self._other_stack.setCurrentIndex(idx)
+        self._do_layout()
+        self._sidebar.raise_()
 
     def _build(self):
         # Use a zero-margin layout with a single full-size container
@@ -1969,8 +1993,10 @@ class LocusTrayApp(QSystemTrayIcon):
             self._open_window()
 
     def _open_window(self):
+        global _WINDOW_REF
         if self._window is None:
             self._window = LocusWindow()
+            _WINDOW_REF = self._window
             self._window.destroyed.connect(lambda: setattr(self, "_window", None))
         self._window.update_state({"events": self._events, "session": self._session_info})
         self._window.show()
