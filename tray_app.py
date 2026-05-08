@@ -1783,10 +1783,7 @@ class LocusWindow(QWidget):
             "Analytics",
             "View your focus stats -- total time, sessions, most blocked apps and sites."
         ))
-        self._other_stack.addWidget(PlaceholderPane(                   # 2
-            "Settings",
-            "Configure blocking behavior, override code, notification preferences, and appearance."
-        ))
+        self._other_stack.addWidget(SettingsPane())                    # 2
         self._other_stack.hide()
 
         # Sidebar floats on top of everything
